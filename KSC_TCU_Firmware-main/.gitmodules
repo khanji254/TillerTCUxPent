@@ -1,0 +1,3 @@
+[submodule "components/jk_bms"]
+	path = components/jk_bms
+	url = git@github.com:Geviton/jk_bms.git

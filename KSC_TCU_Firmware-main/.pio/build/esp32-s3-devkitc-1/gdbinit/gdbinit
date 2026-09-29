@@ -1,0 +1,2 @@
+source /home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/gdbinit/symbols
+source /home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/gdbinit/connect
