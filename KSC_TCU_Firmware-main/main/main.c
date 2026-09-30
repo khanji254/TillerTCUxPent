@@ -437,6 +437,7 @@ char *create_metadata_payload(float shunt_snapshot_a, float *shunt_max_out)
  * RS-485 half-duplex mode is used.  The MC74HC4052ADG MUX handles bus
  * routing; the UART driver handles TX/RX direction automatically.
  */
+#if 0 /* RS-485 disabled - shunt only mode */
 static void rs485_uart_init(void)
 {
     uart_config_t cfg = {
@@ -477,6 +478,7 @@ static int rs485_read(uint8_t *dst, uint16_t len)
     return uart_read_bytes(BOARD_RS485_UART_NUM, dst, len,
                            pdMS_TO_TICKS(50));
 }
+#endif /* RS-485 disabled - shunt only mode */
 
 /* =========================================================================
  * VOLTAGE ANOMALY CHECK
@@ -594,8 +596,6 @@ static void mqtt_publish_task(void *pvParameters)
 
     ESP_LOGI(TAG, "MQTT publish task started on Core %d", xPortGetCoreID());
 
-    static bool low_battery_shutdown_triggered = false;
-    
     // URC queue must exist before provisioning flow runs,
     // because tcu_load_or_provision_creds() calls xQueueReceive on it.
     urc_queue_init();    
@@ -714,66 +714,18 @@ static void mqtt_publish_task(void *pvParameters)
 		    if (impact) {
 		        ESP_LOGI(TAG, "IMPACT DETECTED!!! Immediate publish.");
 		    }
-			
-            uint8_t ok_count = bms_monitor_get_ok_count();
-            ESP_LOGI(TAG, "Publish tick — batteries_ok=%d", ok_count);
-
-            if (ok_count == 0 || impact) {
-                // No valid batteries or impact has been detected— publish metadata only 
-                publishing_status_only = true;
-                if(ok_count ==0 && rgb_led_set_alert(ALERT_NO_BATTERIES, false)){ESP_LOGI(TAG, "Switched RGB LED status");}
-    			else { ESP_LOGE(TAG, "Failed to switch RGB LED status!"); 
-				}
-                if (!mqtt_pubclient_status()) {
-                    ESP_LOGE(TAG, "Metadata-only publish failed");
-                }
-
+            ESP_LOGI(TAG, "Publish tick (shunt-only mode)");
+            publishing_status_only = true;
+            if (!mqtt_pubclient_status()) {
+                ESP_LOGE(TAG, "Telemetry publish failed");
             } else {
-                publishing_status_only = false;
-                /*
-                 * mqtt_pubclient_battery() now consumes the atomic snapshot
-                 * from bms_monitor_get_snapshot() internally (no queue).
-                 * It publishes all batteries with status == BMS_STATUS_OK
-                 * and skips those with BMS_STATUS_NO_DATA, so partial
-                 * battery data (1 or 2 readable packs) is still published.
-                 * It also updates average_battery_soc used by the LED alert
-                 * and metadata field "27".
-                 * Returns false only if no new cycle is available or publish failed.
-                 */
-                if (!mqtt_pubclient_battery()) {
-                    ESP_LOGE(TAG, "Battery publish failed");
-                } else {
-                    ESP_LOGI(TAG, "Battery data published");
+                ESP_LOGI(TAG, "Telemetry (shunt & sensors) published");
+            }
 
-                    // Trike shutdown if fewer than all batteries readable 
-                    if (ok_count < BMS_BATTERY_COUNT &&
-                        !low_battery_shutdown_triggered) {
-                        ESP_LOGE(TAG,
-                                 "Only %d/%d batteries readable — shutdown",
-                                 ok_count, BMS_BATTERY_COUNT);
-                        low_battery_shutdown_triggered = true;
-                        trike_ctrl_handle_command(1);
-                    } else if (ok_count == BMS_BATTERY_COUNT) {
-                        low_battery_shutdown_triggered = false;
-                    }
-                }
-
-                // SOC-based LED alert 
-                uint8_t avg_soc = get_average_battery_soc();
-                bool success = true;
-                if (ok_count == BMS_BATTERY_COUNT) {
-                    if (avg_soc > 0 && avg_soc <= SOC_CRIT_THRESHOLD_PCT) {
-                        success = rgb_led_set_alert(ALERT_LOW_SOC_CRIT, false);
-                    } else if (avg_soc > SOC_CRIT_THRESHOLD_PCT &&
-                               avg_soc <= SOC_WARN_THRESHOLD_PCT) {
-                        success = rgb_led_set_alert(ALERT_LOW_SOC_WARN, false);
-                    } else if (trike_ctrl_get_power_confirmation()) {
-                        success = rgb_led_set_alert(ALERT_NORMAL, false);
-                    } else {
-                       success = rgb_led_set_alert(ALERT_TRIKE_OFF, false);
-                    }
-                }
-                if(!success)ESP_LOGE(TAG, "Failed to switch RGB LED status!"); 
+            if (trike_ctrl_get_power_confirmation()) {
+                rgb_led_set_alert(ALERT_NORMAL, false);
+            } else {
+                rgb_led_set_alert(ALERT_TRIKE_OFF, false);
             }
 
             last_publish_ms = now;
@@ -914,10 +866,9 @@ static void diag_log_task(void *pvParameters)
                      diag_shunt_a, diag_shunt_max_a);
         }
 
-        /* --- BMS --- */
-        uint8_t ok_count = bms_monitor_get_ok_count();
-        ESP_LOGI(TAG, "[BMS] batteries_ok=%d/%d avg_soc=%d%%",
-                 ok_count, BMS_BATTERY_COUNT, get_average_battery_soc());
+        /* --- Battery (Shunt-only) --- */
+        ESP_LOGI(TAG, "[BATTERY] Shunt-only mode: I=%.3fA I_max=%.3fA",
+                 diag_shunt_a, diag_shunt_max_a);
 
         /* --- GPS --- */
         gps_position_t gps;
@@ -1003,9 +954,9 @@ void app_main(void)
 
     //Use hub name as the actual TCU number e.g jmbc_0008
     //snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_8);
-    snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_2);
+   snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_3);
     //snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_7);
-    //snprintf(HUB_NAME, sizeof(HUB_NAME), "TCU_%s", deviceSerial);
+    snprintf(HUB_NAME, sizeof(HUB_NAME), "TCU_%s", deviceSerial);
 
     /* LIS3DHTR accelerometer */
     ret = lis3dhtr_init();
@@ -1040,26 +991,13 @@ void app_main(void)
     power_mgmt_get_reset_reason(reset_reason, sizeof(reset_reason));
     ESP_LOGI(TAG, "Reset reason: %s", reset_reason);
 
-    /* RS-485 UART */
-    rs485_uart_init();
+    /* RS-485 UART disabled - shunt only mode */
     uart_modem_mutex_init();
 
-    /* Modbus RTU interface */
-    struct modbus_rtu_interface_s rtu_interface = {
-        .write = rs485_write,
-        .read  = rs485_read,
-    };
-
-    /* Assign interface to JK-BMS devices */
-    jk_device_t *jk_devices = bms_monitor_get_devices();
-    for (int i = 0; i < BMS_BATTERY_COUNT; i++) {
-        jk_devices[i].modbus.interface = rtu_interface;
-    }
-
-    /* BMS monitoring task */
-    ret = bms_monitor_task_init(&rtu_interface);
+    /* Battery monitoring task (shunt-only mode) */
+    ret = bms_monitor_task_init(NULL);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "BMS monitor init failed");
+        ESP_LOGE(TAG, "Battery monitor init failed");
         esp_restart();
     }
 

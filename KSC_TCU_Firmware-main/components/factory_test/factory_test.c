@@ -607,7 +607,7 @@ stage_loop_break:
  *
  * @param[out] r  Test result record.
  */
-static void test_rs485_mux(factory_test_result_t *r)
+static void __attribute__((unused)) test_rs485_mux(factory_test_result_t *r)
 {
     r->name   = "RS-485 MUX TX (2 batteries)";
     r->passed = false;
@@ -794,7 +794,7 @@ esp_err_t factory_test_run(void)
 
     test_lis3dhtr  (&results[total++]);
     test_modem     (&results[total++]);
-    test_rs485_mux (&results[total++]);
+    //test_rs485_mux (&results[total++]);
     test_rgb_leds  (&results[total++]);
     test_adcs      (&results[total++]);
     //test_gps_init  (&results[total++]);

@@ -50,7 +50,7 @@
  
 extern char deviceSerial[];
 char HUB_NAME[32]  = {0};
-char APN[32]       = "safaricomiot";
+char APN[32]       = "safaricom";
  
 /* Runtime MQTT credential buffers — loaded from NVS or set during provision */
 char mqtt_username[TCU_CRED_MAX_LEN] = {0};
@@ -376,127 +376,10 @@ bool mqtt_pubclient_status()
 bool mqtt_pubclient_battery(void)
 {
     /*
-     * CHANGED: queue removed. Battery data now comes from the atomic
-     * cycle snapshot via bms_monitor_get_snapshot(). s_last_consumed_cycle
-     * is static — persists across calls so the same cycle is never
-     * published twice.
-     *
-     * Partial publish supported: entries with status == BMS_STATUS_NO_DATA
-     * are skipped; entries with BMS_STATUS_OK are published individually.
-     * This matches the behaviour of the original queue-based code.
+     * Shunt-only mode: no individual BMS pack telemetry.
+     * Publish metadata payload with shunt current and analog sensor telemetry.
      */
-    static uint32_t s_last_consumed_cycle = 0;
-
-    bms_queued_data_t snapshot[BMS_BATTERY_COUNT];
-    
-    float publish_shunt_a = 0.0f;
-    float publish_shunt_max_a = 0.0f;
-    
-    if (!bms_monitor_get_snapshot(snapshot, &s_last_consumed_cycle,
-                                  &publish_shunt_a, &publish_shunt_max_a)) {
-        ESP_LOGW(TAG_GSM,
-                 "mqtt_pubclient_battery: no new BMS cycle available — skipping");
-        return false;
-    }
-
-    int     batteries_published = 0;
-    uint32_t soc_sum            = 0;
-    int      valid_soc_count    = 0;
-
-    for (int i = 0; i < BMS_BATTERY_COUNT; i++) {
-
-        if (snapshot[i].status != BMS_STATUS_OK) {
-            ESP_LOGW(TAG_GSM, "Skipping battery %d (status=%d)",
-                     snapshot[i].battery_id + 1, snapshot[i].status);
-            continue;
-        }
-
-        soc_sum += snapshot[i].soc;
-        valid_soc_count++;
-
-        char *payload = create_battery_json_payload(
-            &snapshot[i], snapshot, BMS_BATTERY_COUNT);
-        if (!payload) {
-            ESP_LOGE(TAG_GSM, "JSON alloc failed for battery %d",
-                     snapshot[i].battery_id + 1);
-            continue;
-        }
-
-        char cmd[120];
-        snprintf(cmd, sizeof(cmd),
-                 "AT+QMTPUBEX=0,0,0,0,\"v1/devices/trikes/telemetry\",%d",
-                 (int)strlen(payload));
-
-        bool pub_ok = false;
-        for (int attempt = 0; attempt < 2 && !pub_ok; attempt++) {
-            if (!send_at_command(cmd, ">", RETRIES, CMD_DELAY_MS, NULL, 0)) {
-                continue;
-            }
-            uart_write_bytes(MODEM_UART_NUM, payload, strlen(payload));
-            vTaskDelay(pdMS_TO_TICKS(12));
-            uart_write_bytes(MODEM_UART_NUM, "\x1A", 1);
-            vTaskDelay(pdMS_TO_TICKS(3));
-            pub_ok = true;
-        }
-
-        free(payload);
-
-        if (pub_ok) {
-            batteries_published++;
-            ESP_LOGI(TAG_GSM, "Battery %d published (cycle %" PRIu32 ")",
-                     snapshot[i].battery_id + 1, s_last_consumed_cycle);
-        } else {
-            ESP_LOGE(TAG_GSM, "Battery %d publish failed",
-                     snapshot[i].battery_id + 1);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    /*
-     * Update module-level average SOC — read by get_average_battery_soc()
-     * which is called from create_metadata_payload() (field "27") and
-     * from main.c for the SOC-based LED alert logic.
-     */
-    average_battery_soc = (valid_soc_count > 0)
-                          ? (uint8_t)(soc_sum / valid_soc_count)
-                          : 0;
-
-    /*
-     * Cross-battery voltage anomaly check.
-     * CHANGED: previously called here AND duplicated in main.c.
-     * It remains here only — main.c no longer calls it separately.
-     */
-    check_voltage_anomaly_and_act(snapshot, BMS_BATTERY_COUNT);
-
-    /* Publish metadata after battery payloads */
-    /* publish_shunt_a is now a local frozen copy. The BMS task will
-     * overwrite s_shunt_current_snapshot_a during the next cycle's
-     * pass 1 (~440ms from now) but this variable is unaffected.
-     * All battery payloads AND the metadata P29 will use this value. */    
-    char *metadata = create_metadata_payload(publish_shunt_a, &publish_shunt_max_a);
-    if (metadata) {
-        char cmd[120];
-        snprintf(cmd, sizeof(cmd),
-                 "AT+QMTPUBEX=0,0,0,0,\"v1/devices/trikes/telemetry\",%d",
-                 (int)strlen(metadata));
-
-        bool meta_ok = false;
-        for (int attempt = 0; attempt < 2 && !meta_ok; attempt++) {
-            if (!send_at_command(cmd, ">", RETRIES, CMD_DELAY_MS,
-                                 NULL, 0)) {
-                continue;
-            }
-            uart_write_bytes(MODEM_UART_NUM, metadata, strlen(metadata));
-            vTaskDelay(pdMS_TO_TICKS(12));
-            uart_write_bytes(MODEM_UART_NUM, "\x1A", 1);
-            vTaskDelay(pdMS_TO_TICKS(3));
-            meta_ok = true;
-        }
-        free(metadata);
-    }
-
-    return (batteries_published > 0);
+    return mqtt_pubclient_status();
 }
 
 /* =========================================================================
@@ -857,19 +740,72 @@ bool poweron_modem(void)
     return false;
 }
 
+static int parse_registration_stat(const char *buf, const char *prefix)
+{
+    char *p = strstr(buf, prefix);
+    if (!p) return -1;
+    p += strlen(prefix);
+    while (*p == ' ') p++;
+    int n = -1, stat = -1;
+    if (sscanf(p, "%d,%d", &n, &stat) == 2) {
+        return stat;
+    } else if (sscanf(p, "%d", &stat) == 1) {
+        return stat;
+    }
+    return -1;
+}
+
+static bool is_network_registered(void)
+{
+    char resp[128] = {0};
+
+    /* 1. Check EPS registration (LTE - primary for EG915N) */
+    if (send_at_command("AT+CEREG?", "+CEREG:", 1, 800, resp, sizeof(resp))) {
+        int stat = parse_registration_stat(resp, "+CEREG:");
+        if (stat == 1 || stat == 5) {
+            ESP_LOGI(TAG_GSM, "Network registered (LTE EPS stat=%d)", stat);
+            return true;
+        }
+    }
+
+    /* 2. Check CS registration (fallback / home network attach) */
+    memset(resp, 0, sizeof(resp));
+    if (send_at_command("AT+CREG?", "+CREG:", 1, 800, resp, sizeof(resp))) {
+        int stat = parse_registration_stat(resp, "+CREG:");
+        if (stat == 1 || stat == 5) {
+            ESP_LOGI(TAG_GSM, "Network registered (CS stat=%d)", stat);
+            return true;
+        }
+    }
+
+    /* 3. Check GPRS registration (2G/3G packet domain) */
+    memset(resp, 0, sizeof(resp));
+    if (send_at_command("AT+CGREG?", "+CGREG:", 1, 800, resp, sizeof(resp))) {
+        int stat = parse_registration_stat(resp, "+CGREG:");
+        if (stat == 1 || stat == 5) {
+            ESP_LOGI(TAG_GSM, "Network registered (GPRS stat=%d)", stat);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool activate_pdp(void)
 {
-    for (int attempt = 0; attempt < 5; attempt++) {
-        if (send_at_command("AT+CGREG?", "5", RETRIES,
-                            CMD_DELAY_MS, NULL, 0)) {
-            ESP_LOGI(TAG_GSM, "Network registered");
+    bool registered = false;
+    for (int attempt = 0; attempt < 30; attempt++) {
+        if (is_network_registered()) {
+            registered = true;
             break;
         }
-        if (attempt == 4) {
-            ESP_LOGE(TAG_GSM, "Network registration failed");
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10 * (attempt + 1)));
+        ESP_LOGW(TAG_GSM, "Waiting for network registration (attempt %d/30)...", attempt + 1);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    if (!registered) {
+        ESP_LOGE(TAG_GSM, "Network registration failed after timeout");
+        return false;
     }
 
     char apncmd[60];
