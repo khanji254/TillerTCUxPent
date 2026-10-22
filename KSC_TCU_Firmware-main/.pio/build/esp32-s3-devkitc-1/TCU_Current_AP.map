@@ -70992,8 +70992,8 @@ LOAD C:/pio-alt/packages/toolchain-xtensa-esp-elf/bin/../xtensa-esp-elf/../picol
                 0x3c0aef8c        0x0 .pio/build/esp32-s3-devkitc-1/main/main.c.o
                                 0x153 (size before relaxing)
  .rodata.page$0
-                0x3c0aef8c     0x21fd .pio/build/esp32-s3-devkitc-1/main/main.c.o
- *fill*         0x3c0b1189        0x3 
+                0x3c0aef8c     0x21fe .pio/build/esp32-s3-devkitc-1/main/main.c.o
+ *fill*         0x3c0b118a        0x2 
  .rodata.__func__$1
                 0x3c0b118c       0x12 .pio/build/esp32-s3-devkitc-1/main/main.c.o
  *fill*         0x3c0b119e        0x2 

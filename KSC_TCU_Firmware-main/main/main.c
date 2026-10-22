@@ -299,7 +299,7 @@ static esp_err_t root_handler(httpd_req_t *request)
         "function applyFit(){if(!fit)return;let sens=calibrationSensitivity(),corr=sens/fit.b,off=(fit.a-Number($('vref').value))/sens*corr*-1;applyConfig({gain_corr:corr,offset_a:off})}"
         "function clearPoints(){if(confirm('Delete all captured points?')){points=[];localStorage.removeItem('tcuCalPoints');renderFit()}}"
         "function exportCsv(){let csv='true_a,ctrl_mv,adc_mv,adc_std_mv,raw_current_a,current_a\\n'+points.map(p=>[p.true_a,p.ctrl_mv,p.adc_mv,p.adc_std_mv,p.raw_current_a,p.current_a].join(',')).join('\\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='tcu_current_calibration.csv';a.click()}"
-        "update();setInterval(update,500);</script></body></html>";
+        "update();setInterval(update,1000);</script></body></html>";
     httpd_resp_set_type(request, "text/html");
     return httpd_resp_send(request, page, HTTPD_RESP_USE_STRLEN);
 }
