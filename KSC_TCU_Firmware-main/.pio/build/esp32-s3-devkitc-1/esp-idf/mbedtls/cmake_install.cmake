@@ -1,8 +1,8 @@
-# Install script for directory: /home/goaty/.platformio/packages/framework-espidf/components/mbedtls
+# Install script for directory: C:/pio-alt/packages/framework-espidf/components/mbedtls
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "/usr/local")
+  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/TCU_Current_AP")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
@@ -34,11 +34,11 @@ endif()
 
 # Set path to fallback-tool for dependency-resolution.
 if(NOT DEFINED CMAKE_OBJDUMP)
-  set(CMAKE_OBJDUMP "/home/goaty/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-objdump")
+  set(CMAKE_OBJDUMP "C:/pio-alt/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-objdump.exe")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/esp-idf/mbedtls/mbedtls/cmake_install.cmake")
+  include("C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/esp-idf/mbedtls/mbedtls/cmake_install.cmake")
 endif()
 

@@ -6,22 +6,22 @@ cmake_minimum_required(VERSION 3.5)
 # If CMAKE_DISABLE_SOURCE_CHANGES is set to true and the source directory is an
 # existing directory in our source tree, calling file(MAKE_DIRECTORY) on it
 # would cause a fatal error, even though it would be a no-op.
-if(NOT EXISTS "/home/goaty/.platformio/packages/framework-espidf/components/bootloader/subproject")
-  file(MAKE_DIRECTORY "/home/goaty/.platformio/packages/framework-espidf/components/bootloader/subproject")
+if(NOT EXISTS "C:/pio-alt/packages/framework-espidf/components/bootloader/subproject")
+  file(MAKE_DIRECTORY "C:/pio-alt/packages/framework-espidf/components/bootloader/subproject")
 endif()
 file(MAKE_DIRECTORY
-  "/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader"
-  "/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix"
-  "/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/tmp"
-  "/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src/bootloader-stamp"
-  "/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src"
-  "/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src/bootloader-stamp"
+  "C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader"
+  "C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix"
+  "C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/tmp"
+  "C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src/bootloader-stamp"
+  "C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src"
+  "C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src/bootloader-stamp"
 )
 
 set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
-    file(MAKE_DIRECTORY "/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src/bootloader-stamp/${subDir}")
+    file(MAKE_DIRECTORY "C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src/bootloader-stamp/${subDir}")
 endforeach()
 if(cfgdir)
-  file(MAKE_DIRECTORY "/home/goaty/Desktop/Rift/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
+  file(MAKE_DIRECTORY "C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
 endif()

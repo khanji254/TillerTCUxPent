@@ -4,6 +4,6 @@
 
 method=source_dir
 command=
-source_dir=/home/goaty/.platformio/packages/framework-espidf/components/bootloader/subproject
+source_dir=C:/pio-alt/packages/framework-espidf/components/bootloader/subproject
 work_dir=
 
