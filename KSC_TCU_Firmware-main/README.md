@@ -6,16 +6,22 @@ current-sense circuit.
 ## Hardware assumptions
 
 - Current-sense output: GPIO5, ADC1 channel 4.
-- Reference monitor: GPIO14, ADC2 channel 3. This is displayed and logged only;
-  it is not substituted for the configured current reference.
+- Reference monitor: GPIO4, ADC1 channel 3. It is displayed and logged, and
+  the dashboard also shows a comparison current calculated with this live
+  reference.
 - Current-sense amplifier: INA241A1, gain 10 V/V.
 - Nominal shunt: 0.00050 ohm.
-- Nominal reference midpoint: 1650 mV.
 - Current conversion:
 
-  `raw_current_a = (adc_mv - vref_mv) / (gain * shunt_ohm * 1000)`
+  `raw_current_a = (adc_mv - reference_mv) / (gain * shunt_ohm * 1000)`
 
   `reported_current_a = abs(raw_current_a * scale + offset_a)`
+
+Here, `reference_mv` is the averaged voltage measured on GPIO4. Both corrected
+current fields apply the configured gain correction (`scale`) and current
+offset (`offset_a`), are converted to positive magnitude with `abs()`, and use
+an eight-reading rolling average for the live dashboard and serial display.
+The raw current fields remain signed and unfiltered for diagnostics.
 
 The ADC reading is the average of 64 samples. ESP-IDF ADC curve-fitting
 calibration is used when eFuse calibration data is available. Normal dashboard
@@ -47,7 +53,6 @@ Additional endpoints are:
 
 The dashboard can update:
 
-- `vref`: amplifier reference midpoint in mV.
 - `gain`: INA241 gain.
 - `shunt`: shunt resistance in ohms.
 - `scale`: empirical scale correction.
@@ -66,8 +71,9 @@ control shunt, calculate reference current as:
 
 The dashboard stores captured points in the browser, fits `Vadc = a + b * Itrue`,
 and suggests a gain correction and offset. Apply the fit only after checking
-zero and several known load currents. The IO14 reference reading is useful for
-diagnostics but is not part of the current calculation.
+zero and several known load currents. GPIO4 is the reference used by the main
+current calculation; the dashboard's reference-current field exposes the same
+calculation for comparison and diagnostics.
 
 The compiled fallback defaults are a 0.00050 ohm shunt and a 5.3 A offset.
 Previously saved NVS calibration takes precedence over these defaults; use

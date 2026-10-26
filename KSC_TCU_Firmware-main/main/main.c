@@ -22,11 +22,11 @@
 #define AP_PASSWORD "tcu-current"
 #define CURRENT_CHANNEL ADC_CHANNEL_4
 #define REFERENCE_CHANNEL ADC_CHANNEL_3
-#define SAMPLE_COUNT 64
+#define SAMPLE_COUNT 500
 #define LIVE_AVERAGE_COUNT 8
+#define RAW_EMA_ALPHA 0.3f
 
 typedef struct {
-    float vref_mv;
     float gain;
     float shunt_ohm;
     float scale;
@@ -34,13 +34,9 @@ typedef struct {
 } calibration_t;
 
 static adc_oneshot_unit_handle_t adc_unit;
-static adc_oneshot_unit_handle_t adc2_unit;
 static adc_cali_handle_t adc_calibration;
-static adc_cali_handle_t adc2_calibration;
 static bool adc_calibration_valid;
-static bool adc2_calibration_valid;
 static calibration_t calibration = {
-    .vref_mv = 1650.0f,
     .gain = 10.0f,
     .shunt_ohm = 0.00050f,
     .scale = 0.97f,
@@ -84,8 +80,7 @@ static esp_err_t save_calibration(void)
 
 static bool calibration_is_valid(const calibration_t *value)
 {
-    return value->vref_mv >= 0.0f && value->vref_mv <= 3300.0f &&
-           value->gain >= 0.1f && value->gain <= 1000.0f &&
+    return value->gain >= 0.1f && value->gain <= 1000.0f &&
            value->shunt_ohm >= 0.0000001f && value->shunt_ohm <= 1.0f &&
            value->scale >= -10.0f && value->scale <= 10.0f &&
            fabsf(value->scale) >= 0.001f &&
@@ -104,6 +99,8 @@ typedef struct {
     channel_stats_t reference;
     float current_a;
     float raw_current_a;
+    float reference_current_a;
+    float raw_reference_current_a;
     int requested_samples;
     bool valid;
     bool reference_valid;
@@ -117,14 +114,22 @@ typedef struct {
 } live_average_t;
 
 static live_average_t dashboard_average;
+static live_average_t dashboard_reference_average;
 static live_average_t serial_average;
+static live_average_t serial_reference_average;
+static bool raw_ema_initialized = false;
+static float raw_current_ema = 0.0f;
 static portMUX_TYPE live_average_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void reset_live_averages(void)
 {
     portENTER_CRITICAL(&live_average_lock);
     memset(&dashboard_average, 0, sizeof(dashboard_average));
+    memset(&dashboard_reference_average, 0, sizeof(dashboard_reference_average));
     memset(&serial_average, 0, sizeof(serial_average));
+    memset(&serial_reference_average, 0, sizeof(serial_reference_average));
+    raw_ema_initialized = false;
+    raw_current_ema = 0.0f;
     portEXIT_CRITICAL(&live_average_lock);
 }
 
@@ -142,6 +147,23 @@ static float update_live_average(live_average_t *average, float value)
     average->sum += value;
     average->next = (average->next + 1) % LIVE_AVERAGE_COUNT;
     result = (float)(average->sum / average->count);
+    portEXIT_CRITICAL(&live_average_lock);
+    return result;
+}
+
+/* EMA for the signed, uncorrected current used in diagnostic comparison. */
+static float update_raw_current_ema(float current_a)
+{
+    float result;
+    portENTER_CRITICAL(&live_average_lock);
+    if (!raw_ema_initialized) {
+        raw_current_ema = current_a;
+        raw_ema_initialized = true;
+    } else {
+        raw_current_ema = RAW_EMA_ALPHA * current_a +
+                          (1.0f - RAW_EMA_ALPHA) * raw_current_ema;
+    }
+    result = raw_current_ema;
     portEXIT_CRITICAL(&live_average_lock);
     return result;
 }
@@ -207,7 +229,7 @@ static esp_err_t take_reading(int samples, reading_t *reading)
         read_channel(adc_unit, adc_calibration, adc_calibration_valid,
                      CURRENT_CHANNEL, samples, &reading->current, false);
     esp_err_t reference_err =
-        read_channel(adc2_unit, adc2_calibration, adc2_calibration_valid,
+        read_channel(adc_unit, adc_calibration, adc_calibration_valid,
                      REFERENCE_CHANNEL, samples, &reading->reference, true);
     reading->valid = current_err == ESP_OK;
     reading->reference_valid =
@@ -216,11 +238,17 @@ static esp_err_t take_reading(int samples, reading_t *reading)
         return current_err;
     }
 
+    if (!reading->reference_valid) {
+        return ESP_FAIL;
+    }
+
     reading->raw_current_a =
-        (reading->current.mean_mv - calibration.vref_mv) /
+        (reading->current.mean_mv - reading->reference.mean_mv) /
         (calibration.gain * calibration.shunt_ohm * 1000.0f);
     reading->current_a = fabsf(
         reading->raw_current_a * calibration.scale + calibration.offset_a);
+    reading->raw_reference_current_a = reading->raw_current_a;
+    reading->reference_current_a = reading->current_a;
     return ESP_OK;
 }
 
@@ -249,16 +277,21 @@ static esp_err_t root_handler(httpd_req_t *request)
         "<div class=\"card\"><h2>Live raw data</h2><div class=\"grid\">"
         "<div class=\"details\">Current IO5<br>ADC: <span id=\"adc\">--</span> mV<br>"
         "Noise: <span id=\"adcStd\">--</span> mV<br>Raw ADC: <span id=\"rawAdc\">--</span><br>"
-        "Raw current: <span id=\"rawCurrent\">--</span> A<br>Offset: <span id=\"offset\">--</span> A</div>"
-        "<div class=\"details\">Reference IO14 (display only)<br>Voltage: <span id=\"refMv\">--</span> mV<br>"
+        "Raw current: <span id=\"rawCurrent\">--</span> A<br>"
+        "Filtered raw current (EMA): <span id=\"filteredRawCurrent\">--</span> A<br>"
+        "Offset: <span id=\"offset\">--</span> A</div>"
+        "<div class=\"details\">Reference IO4<br>Voltage: <span id=\"refMv\">--</span> mV<br>"
         "Noise: <span id=\"refStd\">--</span> mV<br>Raw ADC: <span id=\"refRaw\">--</span><br>"
-        "Measured - constant: <span id=\"refDelta\">--</span> mV<br>Vadc - reference: <span id=\"adcMinusRef\">--</span> mV</div>"
+        "Current signal - reference: <span id=\"adcMinusRef\">--</span> mV</div>"
+        "<div class=\"details\">Reference-based current<br>Current using IO4 Vref: "
+        "<span id=\"referenceCurrent\">--</span> A<br>Raw: "
+        "<span id=\"referenceRawCurrent\">--</span> A<br>"
+        "<span class=\"muted\">Uses the live GPIO4 reference voltage.</span></div>"
         "<div class=\"details\">System<br>Clients: <span id=\"clients\">--</span><br>"
         "Uptime: <span id=\"uptime\">--</span> s<br>Samples: <span id=\"samples\">--</span></div></div></div>"
         "<div class=\"card\"><h2>Constants</h2><div class=\"grid\">"
         "<label>INA gain<input id=\"gain\" type=\"number\" step=\"any\"></label>"
         "<label>Shunt (micro-ohms)<input id=\"shunt\" type=\"number\" step=\"any\"></label>"
-        "<label>Reference constant (mV)<input id=\"vref\" type=\"number\" step=\"any\"></label>"
         "<label>Gain correction<input id=\"corr\" type=\"number\" step=\"any\"></label>"
         "<label>Offset (A)<input id=\"offsetCfg\" type=\"number\" step=\"any\"></label></div>"
         "<button onclick=\"applyConfig()\">Apply</button><button onclick=\"resetConfig()\">Reset defaults</button></div>"
@@ -277,19 +310,22 @@ static esp_err_t root_handler(httpd_req_t *request)
         "<button class=\"danger\" onclick=\"clearPoints()\">Clear all</button></div></div><script>"
         "const $=id=>document.getElementById(id), f=(v,d)=>Number.isFinite(Number(v))?Number(v).toFixed(d):'--';"
         "let points=JSON.parse(localStorage.getItem('tcuCalPoints')||'[]'),fit=null,configDirty=false;"
-        "['gain','shunt','vref','corr','offsetCfg'].forEach(id=>$(id).addEventListener('input',()=>configDirty=true));"
+        "['gain','shunt','corr','offsetCfg'].forEach(id=>$(id).addEventListener('input',()=>configDirty=true));"
         "function show(d){$('current').textContent=f(d.current_a,3);$('adc').textContent=f(d.adc_mv,2);"
         "$('adcStd').textContent=f(d.adc_std_mv,3);$('rawAdc').textContent=f(d.raw_adc,0);"
-        "$('rawCurrent').textContent=f(d.raw_current_a,3);$('offset').textContent=f(d.offset_a,3);"
+        "$('rawCurrent').textContent=f(d.raw_current_a,3);"
+        "$('filteredRawCurrent').textContent=f(d.filtered_raw_current_a,3);"
+        "$('offset').textContent=f(d.offset_a,3);"
         "$('refMv').textContent=d.ref_valid?f(d.ref_mv,2):'read failed';$('refStd').textContent=f(d.ref_std_mv,3);"
-        "$('refRaw').textContent=f(d.ref_raw,0);$('refDelta').textContent=f(d.ref_mv-d.ref_const_mv,2);"
         "$('adcMinusRef').textContent=f(d.adc_mv-d.ref_mv,2);$('clients').textContent=d.wifi_clients;"
+        "$('referenceCurrent').textContent=d.ref_valid?f(d.reference_current_a,3):'--';"
+        "$('referenceRawCurrent').textContent=d.ref_valid?f(d.raw_reference_current_a,3):'--';"
         "$('uptime').textContent=f(d.uptime_ms/1000,0);$('samples').textContent=d.samples;"
-        "if(!configDirty)for(const [id,v] of [['gain',d.gain],['shunt',d.shunt_ohms*1e6],['vref',d.ref_const_mv],['corr',d.gain_corr],['offsetCfg',d.offset_a]])$(id).value=v;"
-        "$('status').textContent=d.valid?(d.ref_valid?'Live':'Live (IO14 reference unavailable)'):'Measurement error';renderFit()}"
+        "if(!configDirty)for(const [id,v] of [['gain',d.gain],['shunt',d.shunt_ohms*1e6],['corr',d.gain_corr],['offsetCfg',d.offset_a]])$(id).value=v;"
+        "$('status').textContent=d.valid?(d.ref_valid?'Live':'Live (IO4 reference unavailable)'):'Measurement error';renderFit()}"
         "async function update(){try{let r=await fetch('/api/current',{cache:'no-store'});show(await r.json())}catch(e){$('status').textContent='Connection error'}}"
         "async function zeroCurrent(){let d=await fetch('/api/zero',{method:'POST'}).then(r=>r.json());alert(d.success?'Zero offset updated':d.error||'Zero failed');if(d.success)configDirty=false;update()}"
-        "async function applyConfig(extra={}){let p=new URLSearchParams({gain:$('gain').value,shunt_ohms:String(Number($('shunt').value)/1e6),ref_mv:$('vref').value,gain_corr:$('corr').value,offset_a:$('offsetCfg').value,...extra});let d=await fetch('/api/config?'+p,{method:'POST'}).then(r=>r.json());if(!d.success){alert(d.error||'Config rejected');return}configDirty=false;update()}"
+        "async function applyConfig(extra={}){let p=new URLSearchParams({gain:$('gain').value,shunt_ohms:String(Number($('shunt').value)/1e6),gain_corr:$('corr').value,offset_a:$('offsetCfg').value,...extra});let d=await fetch('/api/config?'+p,{method:'POST'}).then(r=>r.json());if(!d.success){alert(d.error||'Config rejected');return}configDirty=false;update()}"
         "function resetConfig(){configDirty=false;applyConfig({reset:1})}"
         "function trueCurrent(){let o=Number($('override').value);if($('override').value!=='')return Number.isFinite(o)?o:null;let v=Number($('ctrlV').value),r=Number($('ctrlR').value);return r>0&&Number.isFinite(v)?v/r*1000:null}"
         "async function capture(){let t=trueCurrent();if(t===null){alert('Enter a control-shunt value or override current');return}let d=await fetch('/api/capture?n='+$('captureN').value).then(r=>r.json());if(!d.valid){alert('Capture failed');return}points.push({id:Date.now(),true_a:t,ctrl_mv:$('ctrlV').value,adc_mv:d.adc_mv,adc_std_mv:d.adc_std_mv,raw_current_a:d.raw_current_a,current_a:d.current_a});localStorage.setItem('tcuCalPoints',JSON.stringify(points));renderFit()}"
@@ -308,29 +344,39 @@ static esp_err_t current_handler(httpd_req_t *request)
 {
     reading_t reading;
     esp_err_t err = take_reading(SAMPLE_COUNT, &reading);
+    float filtered_raw_current =
+        err == ESP_OK ? update_raw_current_ema(reading.raw_current_a) : 0.0f;
     float displayed_current =
         err == ESP_OK ? update_live_average(&dashboard_average, reading.current_a)
                       : 0.0f;
+    float displayed_reference_current =
+        err == ESP_OK && reading.reference_valid
+            ? update_live_average(&dashboard_reference_average,
+                                  reading.reference_current_a)
+            : 0.0f;
     wifi_sta_list_t stations = {0};
     esp_wifi_ap_get_sta_list(&stations);
-    char response[720];
+    char response[900];
     int length = snprintf(
         response, sizeof(response),
         "{\"valid\":%s,\"ref_valid\":%s,\"current_a\":%.6f,"
-        "\"raw_current_a\":%.6f,\"adc_mv\":%.3f,\"adc_std_mv\":%.3f,"
+        "\"raw_current_a\":%.6f,\"filtered_raw_current_a\":%.6f,"
+        "\"reference_current_a\":%.6f,"
+        "\"raw_reference_current_a\":%.6f,\"adc_mv\":%.3f,\"adc_std_mv\":%.3f,"
         "\"raw_adc\":%d,\"ref_mv\":%.3f,\"ref_std_mv\":%.3f,\"ref_raw\":%d,"
         "\"samples\":%d,\"wifi_clients\":%d,\"uptime_ms\":%llu,"
-        "\"gain\":%.6f,\"shunt_ohms\":%.9f,\"ref_const_mv\":%.3f,"
+        "\"gain\":%.6f,\"shunt_ohms\":%.9f,"
         "\"gain_corr\":%.6f,\"offset_a\":%.6f,\"sens_mv_per_a\":%.6f}",
         err == ESP_OK ? "true" : "false",
         reading.reference_valid ? "true" : "false", displayed_current,
-        reading.raw_current_a, reading.current.mean_mv, reading.current.std_mv,
+        reading.raw_current_a, filtered_raw_current, displayed_reference_current,
+        reading.raw_reference_current_a, reading.current.mean_mv,
+        reading.current.std_mv,
         (int)lroundf(reading.current.mean_raw), reading.reference.mean_mv,
         reading.reference.std_mv, (int)lroundf(reading.reference.mean_raw),
         reading.requested_samples, stations.num,
         (unsigned long long)(esp_log_timestamp()),
-        calibration.gain, calibration.shunt_ohm, calibration.vref_mv,
-        calibration.scale, calibration.offset_a,
+        calibration.gain, calibration.shunt_ohm, calibration.scale, calibration.offset_a,
         calibration.gain * calibration.shunt_ohm * 1000.0f);
     httpd_resp_set_type(request, "application/json");
     return httpd_resp_send(request, response, length);
@@ -340,7 +386,7 @@ static esp_err_t capture_handler(httpd_req_t *request)
 {
     char query[64];
     char text[16];
-    int samples = 1000;
+    int samples = 2000;
     if (httpd_req_get_url_query_str(request, query, sizeof(query)) == ESP_OK &&
         httpd_query_key_value(query, "n", text, sizeof(text)) == ESP_OK) {
         samples = atoi(text);
@@ -352,21 +398,24 @@ static esp_err_t capture_handler(httpd_req_t *request)
     }
     reading_t reading;
     esp_err_t err = take_reading(samples, &reading);
-    char response[720];
+    char response[900];
     int length = snprintf(
         response, sizeof(response),
         "{\"valid\":%s,\"ref_valid\":%s,\"current_a\":%.6f,"
-        "\"raw_current_a\":%.6f,\"adc_mv\":%.3f,\"adc_std_mv\":%.3f,"
+        "\"raw_current_a\":%.6f,\"reference_current_a\":%.6f,"
+        "\"raw_reference_current_a\":%.6f,\"adc_mv\":%.3f,\"adc_std_mv\":%.3f,"
         "\"raw_adc\":%d,\"ref_mv\":%.3f,\"ref_std_mv\":%.3f,\"ref_raw\":%d,"
-        "\"samples\":%d,\"gain\":%.6f,\"shunt_ohms\":%.9f,\"ref_const_mv\":%.3f,"
+        "\"samples\":%d,\"gain\":%.6f,\"shunt_ohms\":%.9f,"
         "\"gain_corr\":%.6f,\"offset_a\":%.6f}",
         err == ESP_OK ? "true" : "false",
         reading.reference_valid ? "true" : "false", reading.current_a,
-        reading.raw_current_a, reading.current.mean_mv, reading.current.std_mv,
+        reading.raw_current_a, reading.reference_current_a,
+        reading.raw_reference_current_a, reading.current.mean_mv,
+        reading.current.std_mv,
         (int)lroundf(reading.current.mean_raw), reading.reference.mean_mv,
         reading.reference.std_mv, (int)lroundf(reading.reference.mean_raw),
         reading.requested_samples, calibration.gain, calibration.shunt_ohm,
-        calibration.vref_mv, calibration.scale, calibration.offset_a);
+        calibration.scale, calibration.offset_a);
     httpd_resp_set_type(request, "application/json");
     return httpd_resp_send(request, response, length);
 }
@@ -401,7 +450,6 @@ static esp_err_t config_handler(httpd_req_t *request)
     calibration_t candidate = calibration;
     if (query_present(request, "reset")) {
         candidate = (calibration_t){
-            .vref_mv = 1650.0f,
             .gain = 10.0f,
             .shunt_ohm = 0.00050f,
             .scale = 0.97f,
@@ -409,9 +457,6 @@ static esp_err_t config_handler(httpd_req_t *request)
         };
     } else {
         float value;
-        if (query_float(request, "ref_mv", &value)) {
-            candidate.vref_mv = value;
-        }
         if (query_float(request, "gain", &value)) {
             candidate.gain = value;
         }
@@ -513,11 +558,22 @@ static void serial_measurement_task(void *argument)
         if (take_reading(SAMPLE_COUNT, &reading) == ESP_OK) {
             float displayed_current =
                 update_live_average(&serial_average, reading.current_a);
+            float displayed_reference_current =
+                reading.reference_valid
+                    ? update_live_average(&serial_reference_average,
+                                          reading.reference_current_a)
+                    : 0.0f;
             ESP_LOGI(TAG,
-                     "Current: %.3f A average (raw %.3f A), ADC: %.2f mV, noise: %.3f mV",
+                     "Current: %.3f A average (raw %.3f A), "
+                     "GPIO4-reference current: %.3f A (raw %.3f A), "
+                     "ADC: %.2f mV, GPIO4 reference: %.2f mV, noise: %.3f mV",
                      displayed_current,
                      reading.raw_current_a,
-                     reading.current.mean_mv, reading.current.std_mv);
+                     displayed_reference_current,
+                     reading.raw_reference_current_a,
+                     reading.current.mean_mv,
+                     reading.reference.mean_mv,
+                     reading.current.std_mv);
         } else {
             ESP_LOGE(TAG, "Current measurement failed");
         }
@@ -530,7 +586,6 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     if (load_calibration() != ESP_OK || !calibration_is_valid(&calibration)) {
         calibration = (calibration_t){
-            .vref_mv = 1650.0f,
             .gain = 10.0f,
             .shunt_ohm = 0.00050f,
             .scale = 0.97f,
@@ -541,14 +596,11 @@ void app_main(void)
     adc_oneshot_unit_init_cfg_t unit_config = {
         .unit_id = ADC_UNIT_1, .ulp_mode = ADC_ULP_MODE_DISABLE};
     ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_config, &adc_unit));
-    adc_oneshot_unit_init_cfg_t adc2_config = {
-        .unit_id = ADC_UNIT_2, .ulp_mode = ADC_ULP_MODE_DISABLE};
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc2_config, &adc2_unit));
     adc_oneshot_chan_cfg_t channel_config = {
         .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_unit, CURRENT_CHANNEL,
                                                 &channel_config));
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc2_unit, REFERENCE_CHANNEL,
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_unit, REFERENCE_CHANNEL,
                                                 &channel_config));
 
     adc_cali_curve_fitting_config_t calibration_config = {
@@ -559,14 +611,6 @@ void app_main(void)
     adc_calibration_valid =
         adc_cali_create_scheme_curve_fitting(&calibration_config,
                                              &adc_calibration) == ESP_OK;
-    adc_cali_curve_fitting_config_t adc2_calibration_config = {
-        .unit_id = ADC_UNIT_2,
-        .atten = ADC_ATTEN_DB_12,
-        .bitwidth = ADC_BITWIDTH_DEFAULT,
-    };
-    adc2_calibration_valid =
-        adc_cali_create_scheme_curve_fitting(&adc2_calibration_config,
-                                             &adc2_calibration) == ESP_OK;
 
     start_wifi();
     start_http_server();
