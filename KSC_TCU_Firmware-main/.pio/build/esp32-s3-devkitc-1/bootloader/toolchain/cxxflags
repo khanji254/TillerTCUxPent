@@ -1,6 +1,0 @@
-"-specs=C:/Projects/TillerTCUxPent/KSC_TCU_Firmware-main/.pio/build/esp32-s3-devkitc-1/bootloader/specs/picolibc.specs"
--mlongcalls
--fno-builtin-memcpy
--fno-builtin-memset
--fno-builtin-bzero
--fno-rtti
