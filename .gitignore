@@ -1,0 +1,5 @@
+/build/
+.pio/
+compile_commands.json
+*.old
+.old
