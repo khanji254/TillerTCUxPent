@@ -2,8 +2,8 @@
  * @file power_trike_ctrl.c
  * @brief Power Management and Trike Power Control — Combined Implementation
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "power_trike_ctrl.h"
@@ -241,7 +241,7 @@ static void power_monitor_task(void *pvParameters)
 
         /*
          * Periodic modem health check.
-         * On TCU V1.1 the mains detection pin has been removed; modem
+         * On TCU V2.1 the mains detection pin has been removed; modem
          * health is checked regardless of power source.
          */
         if ((now - last_modem_check) >= MODEM_CHECK_INTERVAL_MS) {

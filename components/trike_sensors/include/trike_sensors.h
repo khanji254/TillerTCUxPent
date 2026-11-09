@@ -15,8 +15,8 @@
  * (NTC offset) are stored in NVS and can be updated at runtime without
  * a firmware reflash.
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef TRIKE_SENSORS_H_

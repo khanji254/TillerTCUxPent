@@ -1,11 +1,11 @@
 /**
  * @file Quectel_mqtt.h
- * @brief Quectel EG915N Modem MQTT Transport Layer for KSC TCU V1.1
+ * @brief Quectel EG915N Modem MQTT Transport Layer for KSC TCU V2.1
  *
  * Provides AT-command driven MQTT connectivity over the Quectel EG915N
  * cellular modem.  All pin assignments are sourced from board_config.h.
  *
- * Key changes from original V1.1:
+ * Key changes from original V2.1:
  *   - Full MQTT provisioning workflow integrated.
  *   - PROVISION_KEY / PROVISION_SECRET updated to Songa_Trikes profile.
  *   - MQTT_USERNAME / MQTT_PASSWORD / MQTT_CLIENT_ID are now runtime
@@ -18,8 +18,8 @@
  *     normal and provisioned paths share one connection function.
  *   - New: tcu_force_reprovision() for trike-swap / device-deleted recovery.
  *
- * @author  Mary Mbugua
- * @date    2026-04-10
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
  
 #ifndef QUECTEL_MQTT_H_

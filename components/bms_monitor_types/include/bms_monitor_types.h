@@ -8,8 +8,8 @@
  *
  * Pin definitions previously held here have been moved to board_config.h.
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef BMS_MONITOR_TYPES_H_

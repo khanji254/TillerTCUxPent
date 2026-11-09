@@ -1,6 +1,6 @@
 /**
  * @file lsm6dsox.c
- * @brief LSM6DSOX 6-axis IMU Driver Implementation for KSC TCU V1.1
+ * @brief LSM6DSOX 6-axis IMU Driver Implementation for KSC TCU 2.1
  */
 
 #include "lsm6dsox.h"

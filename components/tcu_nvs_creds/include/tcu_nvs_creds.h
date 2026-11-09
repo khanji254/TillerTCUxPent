@@ -1,6 +1,6 @@
 /**
  * @file tcu_nvs_creds.h
- * @brief KSC TCU V1.1 — NVS Credential Storage for MQTT Provisioning
+ * @brief KSC TCU V2.1 — NVS Credential Storage for MQTT Provisioning
  *
  * Manages persistent MQTT credentials obtained via ThingsBoard device
  * provisioning.  Credentials are stored in a dedicated NVS namespace
@@ -16,8 +16,8 @@
  *  - NVS corruption is detected by read failures, triggering a full erase
  *    and re-provisioning via the fallback path.
  *
- * @author  Mary Mbugua
- * @date    2026-04-10
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef TCU_NVS_CREDS_H_

@@ -1,6 +1,6 @@
 # TCU Shunt Current Sensor Calibration Report
 
-**Date:** October 2, 2026  
+**Date:** November 9, 2026  
 **Target Board:** ESP32-S3 TCU (Board 5, Serial: `9C139E1AF418`)  
 **Reference Tool:** Fluke 374FC True-RMS Clamp Multimeter  
 **Reference Dataset:** `Records_1.csv` (Fluke 374FC) & `Tcu_log.txt` (TCU Serial Logs)  

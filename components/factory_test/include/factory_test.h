@@ -1,6 +1,6 @@
 /*
  * @file factory_test.h
- * @brief Factory / Startup Peripheral Test Suite for KSC TCU V1.1
+ * @brief Factory / Startup Peripheral Test Suite for KSC TCU V2.1
  *
  * Runs a sequence of peripheral self-tests at boot before entering normal
  * operation.  Results are reported via USB CDC (UART0 in console mode)
@@ -29,8 +29,8 @@
  *   AT+CGMI— Manufacturer identification. Response: Quectel\r\nOK (§ 2.5)
  *   AT+GSN — IMEI request. Response: <15-digit IMEI>\r\nOK   (§ 2.8)
  *
- * @author  Mary Mbugua
- * @date    2026-04-02*/
+ * @author  Collins N. Osebe
+ * @date    2026-11-09*/
  
 
 #ifndef FACTORY_TEST_H_

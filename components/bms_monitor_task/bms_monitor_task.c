@@ -1,6 +1,6 @@
 /**
  * @file bms_monitor_task.c
- * @brief Battery Monitoring Task Implementation for KSC TCU V1.1 (Shunt-Only Mode)
+ * @brief Battery Monitoring Task Implementation for KSC TCU V2.1 (Shunt-Only Mode)
  *
  * In this mode, BMS communication and RS-485 Modbus are disabled.
  * Battery current is sampled directly from the analog shunt sensor.

@@ -1,9 +1,9 @@
 /**
  * @file tcu_nvs_creds.c
- * @brief KSC TCU V1.1 — NVS Credential Storage Implementation
+ * @brief KSC TCU V2.1 — NVS Credential Storage Implementation
  *
- * @author  Mary Mbugua
- * @date    2026-04-10
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "tcu_nvs_creds.h"

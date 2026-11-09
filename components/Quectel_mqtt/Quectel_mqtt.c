@@ -2,7 +2,7 @@
  * @file Quectel_mqtt.c
  * @brief Quectel EG915N Modem MQTT Transport Layer Implementation
  *
- * Full provisioning workflow for KSC TCU V1.1.  Key changes from original:
+ * Full provisioning workflow for KSC TCU V2.1.  Key changes from original:
  *
  *  1. Runtime credential buffers (mqtt_username / mqtt_password /
  *     mqtt_client_id) replace the compile-time MQTT_USERNAME macros.
@@ -28,8 +28,8 @@
  *       with stored credentials, tcu_force_reprovision() is called
  *       and the device restarts to re-provision.
  *
- * @author  Mary Mbugua
- * @date    2026-04-10
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
  
 #include "Quectel_mqtt.h"

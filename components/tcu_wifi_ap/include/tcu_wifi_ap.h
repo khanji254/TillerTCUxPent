@@ -1,6 +1,6 @@
 /**
  * @file tcu_wifi_ap.h
- * @brief ESP32-S3 Wi-Fi SoftAP and Live Telemetry Web Portal for KSC TCU V1.1
+ * @brief ESP32-S3 Wi-Fi SoftAP and Live Telemetry Web Portal for KSC TCU V2.1
  *
  * Provides a standalone Wi-Fi Access Point (SoftAP) with captive portal DNS,
  * an embedded HTTP server, and an interactive real-time dashboard.

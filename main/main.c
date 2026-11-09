@@ -1,17 +1,17 @@
 /**
  * @file main.c
- * @brief KSC TCU V1.1 — ESP32-S3 Multi-Battery Monitor System
+ * @brief KSC TCU V2.1 — ESP32-S3 Multi-Battery Monitor System
  *
  * Application entry point and MQTT publish task for the Trike Control Unit
- * Version 1.1.  Combines JK-BMS battery monitoring, Quectel EG915N MQTT
+ * Version 2.1.  Combines JK-BMS battery monitoring, Quectel EG915N MQTT
  * telemetry, GPS position streaming, trike power control, accelerometer
  * motion detection, and analogue sensor readings.
  *
- * Hardware: TCU V1.1 board (ESP32-S3, MC74HC4052ADG RS-485 MUX,
+ * Hardware: TCU V2.1 board (ESP32-S3, MC74HC4052ADG RS-485 MUX,
  *           INA240A1PWR current sense, LIS3DHTR accelerometer).
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "driver/uart.h"
@@ -982,7 +982,7 @@ static void diag_log_task(void *pvParameters) {
 
 void app_main(void) {
 	ESP_LOGI(TAG, "========================================");
-	ESP_LOGI(TAG, "  KSC TCU V1.1  —  ESP32-S3");
+	ESP_LOGI(TAG, "  KSC TCU V2.1  —  ESP32-S3");
 	ESP_LOGI(TAG, "  FW: %s   HW: %s", FW_VERSION_STR, HW_VERSION_STR);
 	ESP_LOGI(TAG, "  Built: %s %s", FW_BUILD_DATE, FW_BUILD_TIME);
 	ESP_LOGI(TAG, "========================================");
@@ -1027,7 +1027,8 @@ void app_main(void) {
 	snprintf(HUB_NAME, sizeof(HUB_NAME), "TCU_%s", deviceSerial);
 
 	/* Wi-Fi SoftAP and Live Telemetry Web Portal */
-	char az snprintf(ap_ssid, sizeof(ap_ssid), "TCU_%s", deviceSerial);
+	char ap_ssid[32];
+	snprintf(ap_ssid, sizeof(ap_ssid), "TCU_%s", deviceSerial);
 	ret = tcu_wifi_ap_init(ap_ssid, "12345678");
 	if (ret != ESP_OK) {
 		ESP_LOGW(TAG, "Wi-Fi AP init failed: %s", esp_err_to_name(ret));

@@ -1,15 +1,15 @@
 # KSC TCU Firmware — Version Comparison & Architecture Delta
 
 **Base Version:** Upstream Initial Release (`Songa/KSC-TCU-Firmware` / `marymbaire/KSC-TCU-Firmware`)  
-**Target Version:** Production Release V1.1.0 (`Rift/KSC_TCU_Firmware-main`)  
+**Target Version:** Production Release V1.0.0(Wan) (`Rift/KSC_TCU_Firmware-tiller`)  
 **Target Platform:** ESP32-S3 · **Framework:** ESP-IDF v5.4.1 / PlatformIO  
-**Date of Analysis:** September 2026
+**Date of Analysis:** November 9, 2026
 
 ---
 
 ## 1. Executive Summary
 
-This document details the complete technical delta between the initial baseline firmware release and the enhanced V1.1.0 production firmware for the **KSC Trike Control Unit (TCU)**. 
+This document details the complete technical delta between the initial baseline firmware release and the enhanced V1.0.0(Wan) production firmware for the **KSC Trike Control Unit (TCU)**. 
 
 The baseline release provided initial drivers and scaffolding for cellular MQTT, GPS, RS-485 Modbus, and ADC sampling. However, it had several critical architectural limitations noted in its initial commit (`4b5ac9e`):
 - Cross-cycle data pollution from FreeRTOS queue depth mismatches.
@@ -19,7 +19,7 @@ The baseline release provided initial drivers and scaffolding for cellular MQTT,
 - Uncalibrated ADC current offsets and temperature drift.
 - Unimplemented motion-aware shutdown sequencing.
 
-The V1.1.0 release resolves all of these limitations through major architectural redesigns across the BMS monitoring engine, sensor calibration pipelines, cellular modem communication stack, power management, and task watchdog subsystem.
+The V1.0.0(Wan) release resolves all of these limitations through major architectural redesigns across the BMS monitoring engine, sensor calibration pipelines, cellular modem communication stack, power management, and task watchdog subsystem.
 
 ---
 
@@ -63,7 +63,7 @@ Problems:
   • Stale data persisted across publish cycles.
   • Required complex queue depth monitoring.
 
-[V1.1.0 Architecture: Atomic Snapshot Mutex]
+[V1.0.0(Wan) Architecture: Atomic Snapshot Mutex]
 bms_monitor_task (Core 0)
   ├── Pass 1: Serial + current read (B1, B2, B3) + synchronized shunt ADC snaps
   ├── Pass 2: Registers (voltage, SOC, SOH, alarms, cells diff)
@@ -93,7 +93,7 @@ Iteration 2 (Intermediate):
   BMS cycle split into pass 1 and pass 2; shunt sampled once after all batteries.
   Result: Shunt lagged Battery 1 by ~880 ms (problematic during dynamic PWM motor throttle).
 
-Iteration 3 (V1.1.0 Current):
+Iteration 3 (V1.0.0 (Wan) Current):
   Shunt ADC oversampled (64x) immediately after each battery's pass 1 current read (~1 ms lag).
   Yields three synchronized points: Average (Field "15"), Peak Max (Field "15b"), and RMS.
 ```
@@ -142,7 +142,7 @@ In the baseline firmware, the accelerometer was polled at low frequency and lack
 
 - **In-Line URC Notification Interception:**
   - In the baseline version, unsolicited result codes (URCs like `+QMTRECV:` and `+QMTSTAT:`) arriving during synchronous AT command execution were discarded by the UART parser.
-  - V1.1.0 inspects every line received in `send_at_command()` and posts matched `+QMTRECV:` notifications to `urc_notification_queue`.
+  - 1.0.0 (Wan) inspects every line received in `send_at_command()` and posts matched `+QMTRECV:` notifications to `urc_notification_queue`.
   - A dedicated `process_urcs_task` drains the queue every 100 ms, ensuring RPC commands and cloud state changes are never dropped.
 - **Self-Provisioning & Credential Derivation:**
   - Deterministic derivation from MAC address and HUB name:
@@ -161,7 +161,7 @@ In the baseline firmware, the accelerometer was polled at low frequency and lack
 
 - **Decoupled Speed Cache:**
   - Direct GPS NMEA reading requires taking the modem UART mutex. Calling this from multiple tasks caused contention.
-  - V1.1.0 introduces `gps_update_speed_cache(speed_kmh, fix_valid)` and `gps_get_speed_cache(&speed_kmh)`.
+  - 1.0.0 (Wan) introduces `gps_update_speed_cache(speed_kmh, fix_valid)` and `gps_get_speed_cache(&speed_kmh)`.
   - Polled at 1 Hz by `diag_log_task`; consumed instantly without blocking by `bms_monitor_task`.
 - **Motion Detection Sensor Fusion:**
   - Primary: GPS speed cache (`speed >= 5.0 km/h` considered in motion).

@@ -1,17 +1,17 @@
 /**
  * @file board_config.h
- * @brief KSC TCU V1.1 Hardware Pin Configuration — ESP32-S3
+ * @brief KSC TCU 2.1 Hardware Pin Configuration — ESP32-S3
  *
  * Single source of truth for all GPIO assignments, UART numbers,
  * ADC channels, and hardware-level constants for the KSC TCU
- * Version 1.1 board (ESP32-S3 variant).
+ * Version 2.1 board (ESP32-S3 variant).
  *
  * To port to a new hardware revision only this file needs updating.
  * No application source file should contain raw GPIO_NUM_xx literals
  * outside of this header.
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef BOARD_CONFIG_H_
@@ -32,7 +32,7 @@ extern "C" {
  * ========================================================================= */
 
 /** PCB hardware revision string — published to ThingsBoard as attribute */
-#define BOARD_HW_REVISION "V2.1.0"
+#define BOARD_HW_REVISION "2.1.0"
 
 /** Number of JK-BMS batteries managed by this TCU */
 #define BOARD_BMS_BATTERY_COUNT 2
