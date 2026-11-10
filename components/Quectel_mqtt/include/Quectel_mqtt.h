@@ -7,7 +7,7 @@
  *
  * Key changes from original V2.1:
  *   - Full MQTT provisioning workflow integrated.
- *   - PROVISION_KEY / PROVISION_SECRET updated to Songa_Trikes profile.
+ *   - Provisioning credentials read from Kconfig (CONFIG_TB_PROVISION_*) or NVS.
  *   - MQTT_USERNAME / MQTT_PASSWORD / MQTT_CLIENT_ID are now runtime
  *     variables loaded from NVS (tcu_nvs_creds), not compile-time defines.
  *   - mqtt_subclient() now checks NVS and runs provisioning if needed.
@@ -74,14 +74,23 @@ extern "C" {
 /* =========================================================================
  * PROVISIONING PROFILE CREDENTIALS
  * =========================================================================
- * These are the PROFILE-LEVEL credentials from the Songa_Trikes device
- * profile.  They are ONLY used during the one-time provisioning handshake.
- * After provisioning, the device uses per-device credentials stored in NVS.
- * Never log or expose PROVISION_SECRET in production builds.
+ * Sourced from Kconfig (CONFIG_TB_PROVISION_KEY / CONFIG_TB_PROVISION_SECRET)
+ * or NVS via tcu_nvs_get_provisioning_credentials().
+ * Never hardcode secrets in source files.
  * ========================================================================= */
- 
-#define PROVISION_KEY        "c1mtrworzsysp7vrth4z"
-#define PROVISION_SECRET     "30irfv1tah0d5on6b1tx"
+
+#include "sdkconfig.h"
+
+#ifndef CONFIG_TB_PROVISION_KEY
+#define CONFIG_TB_PROVISION_KEY ""
+#endif
+
+#ifndef CONFIG_TB_PROVISION_SECRET
+#define CONFIG_TB_PROVISION_SECRET ""
+#endif
+
+#define PROVISION_KEY        CONFIG_TB_PROVISION_KEY
+#define PROVISION_SECRET     CONFIG_TB_PROVISION_SECRET
 #define CREDENTIALS_TYPE     "MQTT_BASIC"
  
 /* Provisioning MQTT connection uses these fixed credentials (TB spec) */

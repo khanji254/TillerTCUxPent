@@ -40,6 +40,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_random.h"
  
 /* =========================================================================
  * MODULE STATE
@@ -1225,8 +1226,12 @@ bool tcu_load_or_provision_creds(void)
             mqtt_username[TCU_CRED_MAX_LEN  - 1] = '\0';
             mqtt_password[TCU_CRED_MAX_LEN  - 1] = '\0';
             mqtt_client_id[TCU_CRED_MAX_LEN - 1] = '\0';
-            ESP_LOGI(TAG_GSM, "Credentials loaded from NVS — user=%s clientId=%s",
-                     mqtt_username, mqtt_client_id);
+            if (strlen(creds.device_name) > 0) {
+                strncpy(HUB_NAME, creds.device_name, sizeof(HUB_NAME) - 1);
+                HUB_NAME[sizeof(HUB_NAME) - 1] = '\0';
+            }
+            ESP_LOGI(TAG_GSM, "Credentials loaded from NVS — device=%s user=%s clientId=%s",
+                     HUB_NAME, mqtt_username, mqtt_client_id);
             return true;
         }
  
@@ -1676,34 +1681,54 @@ bool publish_rpc_responses(RpcResponse *responses, int count)
  * =========================================================================
  * Builds the MQTT_BASIC provisioning request per ThingsBoard spec:
  * {
- *   "deviceName":            "TCU_A4CF12B3E501",
- *   "provisionDeviceKey":    "c1mtrworzsysp7vrth4z",
- *   "provisionDeviceSecret": "30irfv1tah0d5on6b1tx",
+ *   "deviceName":            "TCU_<MAC>",
+ *   "provisionDeviceKey":    "<from Kconfig or NVS>",
+ *   "provisionDeviceSecret": "<from Kconfig or NVS>",
  *   "credentialsType":       "MQTT_BASIC",
- *   "username":              "TCU_A4CF12B3E501",
- *   "password":              "TCU_A4CF12B3E501_ksc",
- *   "clientId":              "A4CF12B3E501"
+ *   "username":              "TCU_<MAC>",
+ *   "password":              "<cryptographically random 32-char hex>",
+ *   "clientId":              "<MAC>"
  * }
  *
- * Convention: username = HUB_NAME, password = HUB_NAME + "_ksc",
- * clientId = deviceSerial (MAC).  This keeps credentials derivable
- * from the hardware identity so they can be reconstructed if NVS
- * is corrupted (see NVS fallback discussion in header comments).
+ * Credentials use a cryptographically secure random password generated via
+ * hardware RNG (esp_fill_random) on the ESP32. Upon successful response,
+ * ThingsBoard saves these credentials and the device persists them into NVS.
  * ========================================================================= */
- 
+
 char *create_provision_json_payload(void)
 {
-    char derived_password[64];
-    snprintf(derived_password, sizeof(derived_password), "%s_ksc", HUB_NAME);
- 
+    char prov_key[TCU_CRED_MAX_LEN] = {0};
+    char prov_secret[TCU_CRED_MAX_LEN] = {0};
+
+    if (tcu_nvs_get_provisioning_credentials(prov_key, sizeof(prov_key),
+                                             prov_secret, sizeof(prov_secret)) != ESP_OK) {
+        ESP_LOGE(TAG_GSM, "Cannot build provisioning payload: missing provisioning key/secret in NVS and Kconfig!");
+        return NULL;
+    }
+
+    /* Generate a cryptographically secure random 32-character hex password per device */
+    uint8_t rand_bytes[16];
+    esp_fill_random(rand_bytes, sizeof(rand_bytes));
+    char random_password[33];
+    for (int i = 0; i < 16; i++) {
+        snprintf(&random_password[i * 2], 3, "%02x", rand_bytes[i]);
+    }
+    random_password[32] = '\0';
+
     cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        ESP_LOGE(TAG_GSM, "Failed to allocate cJSON object for provisioning");
+        return NULL;
+    }
+
     cJSON_AddStringToObject(root, "deviceName",            HUB_NAME);
-    cJSON_AddStringToObject(root, "provisionDeviceKey",    PROVISION_KEY);
-    cJSON_AddStringToObject(root, "provisionDeviceSecret", PROVISION_SECRET);
+    cJSON_AddStringToObject(root, "provisionDeviceKey",    prov_key);
+    cJSON_AddStringToObject(root, "provisionDeviceSecret", prov_secret);
     cJSON_AddStringToObject(root, "credentialsType",       CREDENTIALS_TYPE);
     cJSON_AddStringToObject(root, "username",              HUB_NAME);
-    cJSON_AddStringToObject(root, "password",              derived_password);
+    cJSON_AddStringToObject(root, "password",              random_password);
     cJSON_AddStringToObject(root, "clientId",              deviceSerial);
+
     char *s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return s;

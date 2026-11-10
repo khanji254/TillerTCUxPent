@@ -1020,15 +1020,19 @@ void app_main(void) {
 	/* --- Serial number --- */
 	ESP_LOGI(TAG, "ESP32 Serial: %s", deviceSerial);
 
-	// Use hub name as the actual TCU number e.g jmbc_0008
-	// snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_8);
-	snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_3);
-	// snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_7);
-	snprintf(HUB_NAME, sizeof(HUB_NAME), "TCU_%s", deviceSerial);
+	/* Determine Device Name (HUB_NAME):
+	 * 1. Check NVS for factory-assigned fleet name (e.g., KTCU_0000, KTCU_0001...)
+	 * 2. If not found in NVS, fall back to hardware-unique TCU_<MAC> */
+	if (tcu_nvs_get_device_name(HUB_NAME, sizeof(HUB_NAME)) != ESP_OK || strlen(HUB_NAME) == 0) {
+		snprintf(HUB_NAME, sizeof(HUB_NAME), "TCU_%s", deviceSerial);
+		ESP_LOGW(TAG, "No NVS device name assigned — defaulting to hardware MAC: %s", HUB_NAME);
+	} else {
+		ESP_LOGI(TAG, "Fleet device name loaded from NVS: %s", HUB_NAME);
+	}
 
-	/* Wi-Fi SoftAP and Live Telemetry Web Portal */
+	/* Wi-Fi SoftAP and Live Telemetry Web Portal matches HUB_NAME */
 	char ap_ssid[32];
-	snprintf(ap_ssid, sizeof(ap_ssid), "TCU_%s", deviceSerial);
+	snprintf(ap_ssid, sizeof(ap_ssid), "%s", HUB_NAME);
 	ret = tcu_wifi_ap_init(ap_ssid, "12345678");
 	if (ret != ESP_OK) {
 		ESP_LOGW(TAG, "Wi-Fi AP init failed: %s", esp_err_to_name(ret));

@@ -12,3 +12,17 @@ config ESP_WIFI_PASSWORD
     help
 	WiFi password (WPA or WPA2) for the example to use.
 endmenu
+
+menu "ThingsBoard Configuration"
+    config TB_PROVISION_KEY
+        string "ThingsBoard Provisioning Key"
+        default ""
+        help
+            Device profile provisioning key. Leave empty if pre-flashing via NVS.
+
+    config TB_PROVISION_SECRET
+        string "ThingsBoard Provisioning Secret"
+        default ""
+        help
+            Device profile provisioning secret.
+endmenu

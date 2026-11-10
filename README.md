@@ -46,8 +46,8 @@ The **KSC TCU (Tiller Control Unit) V2.1** is a cellular IoT telematics gateway 
 - **Dynamic Terrain & Vibration Analytics:** High-frequency $208\ \text{Hz}$ LSM6DSOX 6-axis IMU stream processing (with LIS3DHTR backward-compatibility layer) using a 32-sample hardware FIFO to detect soil roughness, RMS vibration, and collision impacts.
 - **Continuous NMEA GNSS Tracking:** Asynchronous NMEA sentence streaming over UART0 with thread-safe GPS speed and position caching.
 - **Motion-Guarded Power & Kill Switch Actuation:** Tiller high-voltage kill switch and contactor control (GPIO21) that enforces a vehicle halt interlock before de-asserting machine power.
-- **Autonomous Wi-Fi SoftAP & Diagnostic Portal:** Embedded Wi-Fi Access Point (`TCU_<serial>`) with captive DNS and a standalone web dashboard for live field monitoring and 1-click CSV/JSON telemetry download.
-- **Zero-Touch Provisioning:** Deterministic MQTT Basic auto-provisioning against ThingsBoard with autonomous NVS credential caching and repair.
+- **Autonomous Wi-Fi SoftAP & Diagnostic Portal:** Embedded Wi-Fi Access Point (`KTCU_<id>` or `TCU_<serial>`) with captive DNS and a standalone web dashboard for live field monitoring and 1-click CSV/JSON telemetry download.
+- **Zero-Touch Provisioning & Dynamic Fleet Naming:** Secure MQTT Basic auto-provisioning against ThingsBoard with 32-character cryptographically random tokens, dynamic NVS fleet naming (e.g. `KTCU_0000`, `KTCU_0001`...), zero hardcoded secrets, and autonomous NVS credential caching and repair.
 
 ### TCU Hardware Evolution (V1.0 → Gen 2.1)
 
@@ -67,7 +67,7 @@ The **KSC TCU (Tiller Control Unit) V2.1** is a cellular IoT telematics gateway 
 | **Modem Control Pins** | RI=GPIO15, DTR=GPIO16 | **RI=GPIO41, DTR=GPIO42**; PWR_KEY=GPIO11, RST_N=GPIO10 |
 | **GPS Interface** | Periodic `AT+QGPSLOC` polling | **Continuous NMEA stream on UART0** (GPIO43/44) with speed cache |
 | **Field Diagnostics** | Serial monitor only | **Wi-Fi SoftAP (`192.168.4.1`) & Live Web Dashboard** |
-| **Cloud Provisioning** | Hardcoded compile-time tokens | **Dynamic NVS-backed auto-provisioning** via ThingsBoard |
+| **Cloud Provisioning** | Hardcoded compile-time tokens | **Dynamic NVS-backed auto-provisioning** (Kconfig/NVS secrets, RNG per-device passwords, sequential `KTCU_xxxx` naming) |
 
 ---
 
@@ -422,16 +422,19 @@ The portal is self-contained in MCU flash with no external CDN or internet depen
 
 | Namespace | Partition | Key | Type | Description |
 |---|---|---|---|---|
-| `tcu_creds` | `nvs` | `prov_done` | `u8` | `1` if device has completed ThingsBoard provisioning |
-| | | `username` | `str` | MQTT username (derived from `HUB_NAME`) |
-| | | `password` | `str` | MQTT password (`HUB_NAME + "_ksc"`) |
-| | | `client_id`| `str` | MQTT client ID (device MAC hex) |
-| `trike_sens`| `nvs` | `cur_offset`| `i32` | Calibrated zero-current offset in integer mA |
-| | | `temp_offset`| `i32` | Calibrated temperature offset in m°C |
-| `trike_ctrl`| `nvs` | `pwr_conf` | `u8` | Tiller power / kill-switch state (restored across reboots) |
-| `jkbms_ser` | `nvs` | `bms0_ser` | `str` | Cached serial number for Battery 1 |
-| | | `bms1_ser` | `str` | Cached serial number for Battery 2 |
-| | | `bms2_ser` | `str` | Cached serial number for Battery 3 |
+| `tcu_creds` | `nvs` | `prov_done`   | `u8`  | `1` if device has completed ThingsBoard provisioning |
+|             |       | `device_name` | `str` | Assigned fleet name (`KTCU_0000`, `KTCU_0001`...) or fallback `TCU_<MAC>` |
+|             |       | `username`    | `str` | MQTT username (assigned device name) |
+|             |       | `password`    | `str` | 32-character cryptographically random token (hardware true RNG) |
+|             |       | `client_id`   | `str` | MQTT client ID (device MAC hex string) |
+|             |       | `prov_key`    | `str` | (Optional) Factory provisioning key; overrides Kconfig if present |
+|             |       | `prov_secret` | `str` | (Optional) Factory provisioning secret; overrides Kconfig if present |
+| `trike_sens`| `nvs` | `cur_offset`  | `i32` | Calibrated zero-current offset in integer mA |
+|             |       | `temp_offset` | `i32` | Calibrated temperature offset in m°C |
+| `trike_ctrl`| `nvs` | `pwr_conf`    | `u8`  | Tiller power / kill-switch state (restored across reboots) |
+| `jkbms_ser` | `nvs` | `bms0_ser`    | `str` | Cached serial number for Battery 1 |
+|             |       | `bms1_ser`    | `str` | Cached serial number for Battery 2 |
+|             |       | `bms2_ser`    | `str` | Cached serial number for Battery 3 |
 
 ---
 
@@ -441,18 +444,27 @@ The portal is self-contained in MCU flash with no external CDN or internet depen
 Power On / Boot
        │
        ▼
+Read Fleet Identity:
+  ├── Check NVS "device_name" (e.g. KTCU_0000) ──> Set HUB_NAME & Wi-Fi AP SSID
+  └── If missing in NVS ──> Fall back to hardware MAC (TCU_<MAC>)
+       │
+       ▼
 tcu_load_or_provision_creds()
        ├── [prov_done == 1] ──> Load credentials from NVS ──> Connect to ThingsBoard
        │                              │
-       │                              └── (Auth Code 5: Auth Rejected) ──> Force Reprovision
+       │                              └── (Auth Code 5: Auth Rejected) ──> Reprovision (keeps device_name)
        ▼
 Provisioning Workflow:
-  1. Connect to ThingsBoard with clientId = MAC, username = "provision"
-  2. Subscribe to /provision/response
-  3. Publish request payload to /provision/request containing HUB_NAME and device secrets
-  4. Intercept +QMTRECV URC notification containing access credentials
-  5. Commit credentials to NVS under `tcu_creds` namespace, set prov_done = 1
-  6. Reboot MCU via esp_restart()
+  1. Retrieve provisioning key/secret:
+       ├── Try NVS ("prov_key" / "prov_secret")
+       └── Fall back to Kconfig (CONFIG_TB_PROVISION_KEY / CONFIG_TB_PROVISION_SECRET)
+  2. Generate 32-character random password using ESP32 hardware RNG (esp_fill_random).
+  3. Connect to ThingsBoard with clientId = MAC, username = "provision".
+  4. Subscribe to /provision/response.
+  5. Publish request to /provision/request with deviceName = HUB_NAME and random password.
+  6. Intercept +QMTRECV URC notification containing confirmed access credentials.
+  7. Commit credentials to NVS under `tcu_creds` namespace, set prov_done = 1.
+  8. Reboot MCU via esp_restart() to begin production telemetry streaming.
 ```
 
 ---
@@ -471,7 +483,7 @@ Every cold boot executes `factory_test_run()` in `components/factory_test/factor
 
 ### 13.1 Building with PlatformIO (Recommended)
 
-The project includes an optimized `platformio.ini` configured with 2MB flash and ESP32 exception decoding:
+The project includes an optimized `platformio.ini` configured with 16MB flash and ESP32 exception decoding:
 
 ```bash
 # Build firmware
@@ -493,12 +505,37 @@ platformio run --target monitor
 # Target configuration (ESP32-S3)
 idf.py set-target esp32s3
 
+# Configure provisioning keys (optional, or inject via environment/NVS)
+idf.py menuconfig   # -> ThingsBoard Configuration
+
 # Build
 idf.py build
 
 # Flash and open serial monitor
 idf.py -p /dev/ttyACM0 flash monitor
 ```
+
+### 13.3 Factory Sequential Fleet Provisioning (`tools/`)
+
+To flash production tillers with sequential identities (`KTCU_0000`, `KTCU_0001`, `KTCU_0002`...) without recompiling firmware per vehicle:
+
+```bash
+# Check next device ID and audit log
+./tools/flash_next.sh --status
+./tools/flash_next.sh --dry-run
+
+# Flash sequential NVS identity to connected board (~1s flash):
+./tools/flash_next.sh
+
+# Flash full firmware stack + sequential NVS identity in one step:
+./tools/flash_next.sh --full
+
+# Manual overrides:
+./tools/flash_next.sh --set-id 10         # Reset counter to KTCU_0010
+./tools/flash_next.sh --name KTCU_SPECIAL # Flash custom device name
+```
+
+Every provisioned device is recorded in `tools/provisioned_fleet.csv` with timestamp, assigned name, and hardware MAC address.
 
 ---
 
@@ -516,4 +553,4 @@ idf.py -p /dev/ttyACM0 flash monitor
 3. [ ] **Active Battery Count:** Ensure `BOARD_BMS_BATTERY_COUNT` in `board_config.h` matches the installed pack count (default: `2`).
 4. [ ] **Kill Switch Contactor Pin:** Confirm that `BOARD_TRIKE_PWR_PIN` is configured to `GPIO_NUM_21` (Net `Kill_switch`).
 5. [ ] **Wi-Fi SoftAP Security:** Verify default Wi-Fi password in `tcu_wifi_ap.h` (`TCU_WIFI_AP_DEFAULT_PASSWORD`) if field deployment requires custom credentials.
-6. [ ] **ThingsBoard Device Provisioning:** Verify `HUB_NAME` in `main.c` is set to the designated serial string prior to initial field provisioning.
+6. [ ] **Sequential NVS Naming & Provisioning:** Verify sequential identity has been flashed via `./tools/flash_next.sh` (or confirm fallback to `TCU_<MAC>`). Ensure ThingsBoard provisioning credentials are set via Kconfig or NVS.
