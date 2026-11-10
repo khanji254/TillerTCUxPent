@@ -481,6 +481,29 @@ bool mqtt_pubclient_battery(void)
  * successfully processed, not as "timed out".
  * ========================================================================= */
  
+/* =========================================================================
+ * RPC ANTI-REPLAY CACHE
+ * =========================================================================
+ * Retains the last 32 ThingsBoard RPC request IDs to prevent duplicate or
+ * replayed commands (e.g. replayed power-off / contactor commands).
+ * ========================================================================= */
+#define RPC_HISTORY_SIZE 32
+static int s_rpc_history[RPC_HISTORY_SIZE] = {0};
+static int s_rpc_history_idx = 0;
+
+static bool is_rpc_request_replayed(int req_id)
+{
+    if (req_id <= 0) return false;
+    for (int i = 0; i < RPC_HISTORY_SIZE; i++) {
+        if (s_rpc_history[i] == req_id) {
+            return true;
+        }
+    }
+    s_rpc_history[s_rpc_history_idx] = req_id;
+    s_rpc_history_idx = (s_rpc_history_idx + 1) % RPC_HISTORY_SIZE;
+    return false;
+}
+
 bool read_buffered_messages(int recv_id)
 {
     /* Only check MQTT connection state in normal (non-provisioning) mode.
@@ -582,6 +605,13 @@ bool read_buffered_messages(int recv_id)
             }
             if (request_id < 0) {
                 ESP_LOGW(TAG_GSM, "No valid request_id in RPC topic: %s", topic);
+                continue;
+            }
+
+            /* Anti-replay protection: drop duplicate or replayed RPC request IDs */
+            if (is_rpc_request_replayed(request_id)) {
+                ESP_LOGW(TAG_GSM, "REPLAY ATTACK BLOCKED: RPC request_id %d already executed — discarding",
+                         request_id);
                 continue;
             }
         }
@@ -1004,6 +1034,21 @@ bool open_mqtts_with_creds(const char *client_id,
                              const char *username,
                              const char *password)
 {
+#if MQTTS_ENABLED
+    /* Configure Quectel EG915N SSL/TLS engine for encrypted MQTTS transport */
+    ESP_LOGI(TAG_GSM, "Configuring modem hardware TLS for MQTTS (port %d)...", MQTT_PORT);
+    send_at_command("AT+QMTCFG=\"ssl\",0,1,1", "OK", 2, 2000, NULL, 0);
+    send_at_command("AT+QSSLCFG=\"sslversion\",1,4", "OK", 2, 2000, NULL, 0);
+    send_at_command("AT+QSSLCFG=\"ciphersuite\",1,0xFFFF", "OK", 2, 2000, NULL, 0);
+    send_at_command("AT+QSSLCFG=\"ignorelocaltime\",1,1", "OK", 2, 2000, NULL, 0);
+    char sec_cmd[32];
+    snprintf(sec_cmd, sizeof(sec_cmd), "AT+QSSLCFG=\"seclevel\",1,%d", MQTTS_SECLEVEL);
+    send_at_command(sec_cmd, "OK", 2, 2000, NULL, 0);
+#else
+    /* Plaintext unencrypted MQTT (SSL disabled) */
+    send_at_command("AT+QMTCFG=\"ssl\",0,0", "OK", 2, 2000, NULL, 0);
+#endif
+
     char open_cmd[100];
     snprintf(open_cmd, sizeof(open_cmd),
              "AT+QMTOPEN=0,\"%s\",%d", MQTT_BROKER, MQTT_PORT);

@@ -25,4 +25,27 @@ menu "ThingsBoard Configuration"
         default ""
         help
             Device profile provisioning secret.
+
+    config TB_MQTTS_ENABLED
+        bool "Enable MQTTS (MQTT over TLS) Transport Encryption"
+        default y
+        help
+            Enables hardware-accelerated TLS on the cellular modem to encrypt all
+            MQTT telemetry, RPC commands, and provisioning credentials.
+
+    config TB_MQTT_PORT
+        int "ThingsBoard MQTT Port"
+        default 8883 if TB_MQTTS_ENABLED
+        default 1883
+        help
+            Port for ThingsBoard connection (8883 for TLS MQTTS, 1883 for unencrypted).
+
+    config TB_MQTTS_SECLEVEL
+        int "TLS Security Level (0=Encrypted/No CA verify, 1=Verify Server CA)"
+        range 0 2
+        default 0
+        depends on TB_MQTTS_ENABLED
+        help
+            0: Encrypts transport with TLS without verifying server CA.
+            1: Full certificate verification requiring CA certificate loaded in modem NVRAM.
 endmenu

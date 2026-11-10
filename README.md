@@ -1,7 +1,7 @@
 # KSC TCU V2.1 — Tiller Control Unit Firmware
 
 **Platform:** ESP32-S3 · **Framework:** ESP-IDF v5.4.1 / PlatformIO · **FW Version:** 1.0.0 (Wan) · **HW Revision:** 2.1 (2.1.0)  
-**ThingsBoard:** `thingsboard.iot.songa.mobi` · **APN:** `safaricom` / `safaricomiot`  
+**ThingsBoard:** `thingsboard.iot.songa.mobi` (MQTTS Port 8883 / TLS) · **APN:** `safaricom` / `safaricomiot`  
 **Target Vehicle:** Kilikawi Tiller (Electric Multi-Purpose Agricultural Tool)
 
 ---
@@ -29,8 +29,7 @@
 11. [MQTT Auto-Provisioning & Credential Lifecycle](#11-mqtt-auto-provisioning--credential-lifecycle)
 12. [Factory Boot Self-Test Suite](#12-factory-boot-self-test-suite)
 13. [Build, Flash & Monitor](#13-build-flash--monitor)
-14. [Version Comparison & Companion Documentation](#14-version-comparison--companion-documentation)
-15. [Production Verification Checklist](#15-production-verification-checklist)
+14. [Production Verification Checklist](#14-production-verification-checklist)
 
 ---
 
@@ -61,7 +60,7 @@ The **KSC TCU (Tiller Control Unit) V2.1** is a cellular IoT telematics gateway 
 | **Shunt Resistor** | Uncalibrated discrete shunt | **$500\ \mu\Omega$ ($0.000500\ \Omega$)** precision manganese-copper bar |
 | **Pack Voltage Sense** | GPIO4 (ADC1_CH3) | **GPIO14 (ADC2_CH3)** via ÷41 resistive divider ($200\ \text{k}\Omega / 5\ \text{k}\Omega$) |
 | **Load Cell Interfaces** | None | **Dual Load Cell inputs** (A: GPIO8/9, B: GPIO16/15) |
-| **Inertial Measurement (IMU)** | None / Optional LIS3DHTR | **LSM6DSOX 6-axis IMU** (I2C0, INT1 on GPIO7, 208 Hz FIFO) |
+| **Inertial Measurement (IMU)** | LIS3DHTR | **LSM6DSOX 6-axis IMU** (I2C0, INT1 on GPIO7, 208 Hz FIFO) |
 | **Status LEDs** | Single monochrome LED | **4 Status LEDs**: Red=GPIO1, Green=GPIO37, Blue=GPIO36, Aux=GPIO35 |
 | **Tiller Power / Kill Switch** | GPIO27 | **GPIO21** (Net `Kill_switch`, active-high gate drive) |
 | **Modem Control Pins** | RI=GPIO15, DTR=GPIO16 | **RI=GPIO41, DTR=GPIO42**; PWR_KEY=GPIO11, RST_N=GPIO10 |
@@ -467,6 +466,12 @@ Provisioning Workflow:
   8. Reboot MCU via esp_restart() to begin production telemetry streaming.
 ```
 
+> [!NOTE]
+> **Zero Hardcoded Secrets & Transport Encryption:**
+> - **Hardware TLS (MQTTS Port 8883):** All cellular traffic (provisioning, telemetry, and RPC) is encrypted via the Quectel EG915N internal SSL engine (`AT+QMTCFG="ssl"` & `AT+QSSLCFG`). Zero plaintext MQTT.
+> - **RPC Anti-Replay Guard:** Incoming ThingsBoard RPC commands are de-duplicated against a 32-entry circular buffer. Duplicate `requestId`s (such as replayed power-off commands) are automatically detected and dropped.
+> - **NVS Credential Survival:** Device credentials survive power cycles, and credential erasure (re-provisioning) preserves the assigned `device_name`.
+
 ---
 
 ## 12. Factory Boot Self-Test Suite
@@ -515,38 +520,81 @@ idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-### 13.3 Factory Sequential Fleet Provisioning (`tools/`)
+### 13.3 Factory Sequential Fleet Provisioning Workflow (`tools/`)
 
-To flash production tillers with sequential identities (`KTCU_0000`, `KTCU_0001`, `KTCU_0002`...) without recompiling firmware per vehicle:
+The firmware supports a **universal binary workflow**: you compile the firmware binary once, and individual tillers receive their unique sequential identities (`KTCU_0000`, `KTCU_0001`, `KTCU_0002`...) via an automated NVS provisioning script.
 
+#### Step 1: Compile Firmware Once
+Compile the universal application binary (reused across all vehicles without code changes):
 ```bash
-# Check next device ID and audit log
-./tools/flash_next.sh --status
-./tools/flash_next.sh --dry-run
-
-# Flash sequential NVS identity to connected board (~1s flash):
-./tools/flash_next.sh
-
-# Flash full firmware stack + sequential NVS identity in one step:
-./tools/flash_next.sh --full
-
-# Manual overrides:
-./tools/flash_next.sh --set-id 10         # Reset counter to KTCU_0010
-./tools/flash_next.sh --name KTCU_SPECIAL # Flash custom device name
+platformio run     # Or: idf.py build
 ```
 
-Every provisioned device is recorded in `tools/provisioned_fleet.csv` with timestamp, assigned name, and hardware MAC address.
+#### Step 2: Check Fleet Status
+Preview the next sequential device name to be assigned:
+```bash
+./tools/flash_next.sh --status
+# Or preview without flashing:
+./tools/flash_next.sh --dry-run
+```
+
+#### Step 3: Connect the Board via USB
+Plug the ESP32-S3 board into your computer. The script automatically detects the active serial port (e.g., `/dev/ttyACM0` or `/dev/ttyUSB0`).
+
+#### Step 4: Execute Flashing
+Choose between full flashing or fast identity flashing:
+
+* **Option A: Brand-New / Unprogrammed Board (Full Flash)**  
+  Flashes bootloader (`0x0`), partition table (`0x8000`), NVS identity (`0x9000`), and application (`0x10000`):
+  ```bash
+  ./tools/flash_next.sh --full
+  ```
+
+* **Option B: Pre-Flashed Board (Fast NVS Flash ~1s)**  
+  If the board already has firmware and only needs its sequential identity assigned:
+  ```bash
+  ./tools/flash_next.sh
+  ```
+
+#### What Happens Automatically
+1. **MAC Detection:** Reads the hardware eFuse MAC address via `esptool`.
+2. **NVS Partition Generation:** Creates a compliant 24 KB ESP-IDF NVS v2 binary containing `device_name = "KTCU_xxxx"`.
+3. **Flashing:** Writes to offset `0x9000` (and application partitions if `--full`).
+4. **Audit Logging:** Appends a timestamped record to `tools/provisioned_fleet.csv`:
+   ```csv
+   2026-11-10 11:45:10, KTCU_0000, A4CF12B3E501, /dev/ttyACM0, SUCCESS
+   ```
+5. **Auto-Increment:** Advances `tools/fleet_registry.json` so the next board flashed receives `KTCU_0001`.
+
+#### Step 5: Post-Flash Verification
+Upon reboot, verify the device:
+1. **Serial Console:** Confirm log output:
+   ```text
+   I (1022) TCU_MAIN: Fleet device name loaded from NVS: KTCU_0000
+   I (1032) TCU_WIFI_AP: Wi-Fi SoftAP started successfully!
+   I (1033) TCU_WIFI_AP:   SSID: KTCU_0000
+   ```
+2. **Wi-Fi SoftAP:** Scan for Wi-Fi networks on a phone or laptop. The SSID will be `KTCU_0000` (Default Password: `12345678`).
+3. **ThingsBoard Provisioning:** When the cellular modem attaches, the TCU auto-provisions under `KTCU_0000` with a 32-character hardware-RNG password.
+
+#### Flashing the Next Board in Assembly
+Unplug the finished board, plug in the next board, and run:
+```bash
+./tools/flash_next.sh
+```
+The board will automatically receive `KTCU_0001`, then `KTCU_0002`, and so forth.
+
+#### Manual Overrides
+```bash
+./tools/flash_next.sh --set-id 10         # Jump counter to KTCU_0010
+./tools/flash_next.sh --set-prefix TILLER_ # Change prefix to TILLER_0000
+./tools/flash_next.sh --name KTCU_SPECIAL # Flash a specific one-off name
+./tools/flash_next.sh --port /dev/ttyUSB1 # Specify custom serial port
+```
 
 ---
 
-## 14. Version Comparison & Companion Documentation
-
-- 👉 **[CURRENT_SENSOR_CALIBRATION_REPORT.md](file:///home/goaty/Desktop/Rift/KSC_TCU_Firmware-tiller/CURRENT_SENSOR_CALIBRATION_REPORT.md)** — Empirical calibration report documenting Fluke 374FC clamp meter synchronization, INA241 polarity correction, and regression curves.
-- 👉 **[FIRMWARE_VERSION_COMPARISON.md](file:///home/goaty/Desktop/Rift/KSC_TCU_Firmware-tiller/FIRMWARE_VERSION_COMPARISON.md)** — Comprehensive technical delta between upstream base firmware and this production release.
-
----
-
-## 15. Production Verification Checklist
+## 14. Production Verification Checklist
 
 1. [ ] **Shunt Current Polarity & Offset:** Confirm that `BOARD_CURRENT_VREF_MV` is set to `1452.0f` and `delta_mv = vref_mv - adc_mv` in `trike_sensors.c` so discharge current is positive.
 2. [ ] **Operating Mode Verification:** Confirm whether the tiller is operating in **Shunt-Only Mode** (bypassed RS-485 Modbus) or **Full Modbus Mode** in `bms_monitor_task.c`.

@@ -65,12 +65,31 @@ extern "C" {
 #define TAG_GSM              "MODEM"
  
 /* =========================================================================
- * THINGSBOARD CONNECTION
+ * THINGSBOARD CONNECTION & TRANSPORT SECURITY
  * ========================================================================= */
- 
+
+#include "sdkconfig.h"
+
 #define MQTT_BROKER          "thingsboard.iot.songa.mobi"
-#define MQTT_PORT             1883
- 
+
+#ifdef CONFIG_TB_MQTTS_ENABLED
+#define MQTTS_ENABLED        1
+#else
+#define MQTTS_ENABLED        1  /* Default to secure MQTTS on port 8883 */
+#endif
+
+#ifdef CONFIG_TB_MQTT_PORT
+#define MQTT_PORT            CONFIG_TB_MQTT_PORT
+#else
+#define MQTT_PORT            8883
+#endif
+
+#ifdef CONFIG_TB_MQTTS_SECLEVEL
+#define MQTTS_SECLEVEL       CONFIG_TB_MQTTS_SECLEVEL
+#else
+#define MQTTS_SECLEVEL       0  /* 0 = Hardware TLS encrypted channel without CA check */
+#endif
+
 /* =========================================================================
  * PROVISIONING PROFILE CREDENTIALS
  * =========================================================================
@@ -78,8 +97,6 @@ extern "C" {
  * or NVS via tcu_nvs_get_provisioning_credentials().
  * Never hardcode secrets in source files.
  * ========================================================================= */
-
-#include "sdkconfig.h"
 
 #ifndef CONFIG_TB_PROVISION_KEY
 #define CONFIG_TB_PROVISION_KEY ""
