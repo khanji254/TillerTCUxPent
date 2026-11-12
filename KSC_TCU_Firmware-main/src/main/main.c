@@ -14,9 +14,9 @@ void app_main(void)
 {
     ESP_LOGI("main", "TCU test starting");
 
-    test_current_sensor_run();        // 01 working
+    //test_current_sensor_run();        // 01 working
     // test_rgb_led_run();            // 02 to do
-    // test_trike_power_run();        // 03 to do
+     test_trike_power_run();        // 03 to do
     // test_lis3dhtr_run();           // 04 to do
     // test_rs485_mux_run();          // 05 to do
     // test_quectel_modem_run();      // 06 to do

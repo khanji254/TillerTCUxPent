@@ -29,3 +29,6 @@
 // 07 Quectel GPS NMEA (UART0)
 #define PIN_GPS_TX       43
 #define PIN_GPS_RX       44
+// 08 Kill switch (GPIO 21)
+#define PIN_KILL_SWITCH 21
+#define PIN_BLUE_LED 36
