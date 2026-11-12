@@ -1043,12 +1043,6 @@ void app_main(void) {
 	if (ret != ESP_OK) {
 		ESP_LOGW(TAG, "LSM6DSOX init failed — motion detection degraded");
 	} else {
-		/* Enable FIFO stream mode for windowed accumulation. */
-		ret = lsm6dsox_fifo_enable();
-		if (ret != ESP_OK) {
-			ESP_LOGW(TAG, "FIFO enable failed — single-sample fallback active");
-		}
-
 		vTaskDelay(pdMS_TO_TICKS(200));
 		// Explicitly switch to TEST mode so HPF is off and gravity is visible
 		lsm6dsox_configure_mode(LSM6DSOX_MODE_TEST);
@@ -1086,18 +1080,21 @@ void app_main(void) {
 		esp_restart();
 	}
 
-	/* Diagnostic logging & Wi-Fi telemetry feeder — 1Hz, streams immediately */
-	xTaskCreatePinnedToCore(diag_log_task, "diag_log", 5120, NULL, 2, NULL, 0);
-
-	/* Factory / startup self-test */
+	/* Factory / startup self-test (must finish before tasks touch modem/GPS) */
 	ESP_LOGI(TAG, "Running factory self-test...");
 	esp_err_t test_result = factory_test_run();
 	if (test_result != ESP_OK) {
 		ESP_LOGW(TAG, "One or more factory tests failed — continuing anyway");
 	}
 
-	/* Switch accelerometer to PRODUCTION mode (±2g, 208 Hz, HPF enabled) */
-	lsm6dsox_configure_mode(LSM6DSOX_MODE_PRODUCTION);
+	/* Switch accelerometer to PRODUCTION mode (±2g, 208 Hz, HPF enabled)
+	 * and enable FIFO stream right before accel_drain_task starts so the
+	 * hardware FIFO does not overflow during calibration / factory test. */
+	if (lsm6dsox_configure_mode(LSM6DSOX_MODE_PRODUCTION) == ESP_OK) {
+		if (lsm6dsox_fifo_enable() != ESP_OK) {
+			ESP_LOGW(TAG, "FIFO enable failed — single-sample fallback active");
+		}
+	}
 
 	/* Application tasks */
 	xTaskCreatePinnedToCore(mqtt_publish_task, "mqtt_publish", 6144, NULL, 5,
@@ -1110,6 +1107,10 @@ void app_main(void) {
 	 * to keep I2C operations off Core 1 (MQTT/modem UART). */
 	xTaskCreatePinnedToCore(accel_drain_task, "accel_drain", 3072, NULL, 6,
 							NULL, 0);
+
+	/* Diagnostic logging & Wi-Fi telemetry feeder — 1Hz (after factory test
+	 * so modem/GPS AT probes do not race test_modem()) */
+	xTaskCreatePinnedToCore(diag_log_task, "diag_log", 5120, NULL, 2, NULL, 0);
 
 	ESP_LOGI(TAG, "All tasks started successfully");
 	ESP_LOGI(TAG, "========================================");

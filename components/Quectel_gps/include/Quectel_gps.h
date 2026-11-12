@@ -31,8 +31,7 @@
 extern "C" {
 #endif
 /** Speed above which the trike is considered in motion (km/h). */
-//#define GPS_MOTION_SPEED_THRESHOLD_KMH   1.5f
-#define GPS_MOTION_SPEED_THRESHOLD_KMH   5.0f
+#define GPS_MOTION_SPEED_THRESHOLD_KMH   1.5f
 
 /** Maximum age of a cached GPS speed reading before falling back
  *  to current-based detection (ms).

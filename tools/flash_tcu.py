@@ -24,6 +24,8 @@ Usage:
 import argparse
 import csv
 import datetime
+import glob
+import importlib.util
 import json
 import os
 import shutil
@@ -152,21 +154,82 @@ def generate_nvs_binary(device_name: str, prov_key="", prov_secret="", size=NVS_
     return b"".join(pages)
 
 
-def find_esptool():
-    candidates = [
+def _python_has_module(python_bin, module_name):
+    try:
+        res = subprocess.run(
+            [python_bin, "-c", f"import {module_name}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def find_esptool_cmd(esptool_override=None):
+    """Resolve an executable esptool command prefix across PATH, PlatformIO, and ESP-IDF."""
+    if esptool_override:
+        if not os.path.exists(esptool_override):
+            return None
+        if os.access(esptool_override, os.X_OK) and not esptool_override.endswith(".py"):
+            return [esptool_override]
+        return [sys.executable, esptool_override]
+
+    pio_core = os.environ.get("PLATFORMIO_CORE_DIR", os.path.expanduser("~/.platformio"))
+    pio_bins = [os.path.join(pio_core, "penv", "bin")]
+    pio_cli = shutil.which("pio")
+    if pio_cli:
+        pio_bins.append(os.path.dirname(os.path.realpath(pio_cli)))
+
+    # 1. Direct executables / wrapper scripts on PATH, PlatformIO penv, or ~/.local/bin
+    direct_candidates = [
         shutil.which("esptool.py"),
         shutil.which("esptool"),
-        os.path.expanduser("~/.platformio/penv/bin/esptool.py"),
         os.path.expanduser("~/.local/bin/esptool.py"),
+        os.path.expanduser("~/.local/bin/esptool"),
     ]
-    for c in candidates:
-        if c and os.path.exists(c):
-            return c
+    for bin_dir in pio_bins:
+        direct_candidates.extend([
+            os.path.join(bin_dir, "esptool.py"),
+            os.path.join(bin_dir, "esptool"),
+        ])
+    for path in direct_candidates:
+        if path and os.path.exists(path):
+            return [path]
+
+    # 2. Find an available Python interpreter (prefer PlatformIO penv if present)
+    python_candidates = []
+    for bin_dir in pio_bins:
+        for py_name in ("python", "python3"):
+            py_path = os.path.join(bin_dir, py_name)
+            if os.path.exists(py_path) and py_path not in python_candidates:
+                python_candidates.append(py_path)
+    if sys.executable not in python_candidates:
+        python_candidates.append(sys.executable)
+
+    # 3. PlatformIO's tool-esptoolpy package
+    for pkg_dir in sorted(glob.glob(os.path.join(pio_core, "packages", "tool-esptoolpy*"))):
+        esptool_py = os.path.join(pkg_dir, "esptool.py")
+        if os.path.exists(esptool_py):
+            return [python_candidates[0], esptool_py]
+
+    # 4. Python -m esptool in current Python, PlatformIO penv, or ESP-IDF venv
+    if importlib.util.find_spec("esptool") is not None:
+        return [sys.executable, "-m", "esptool"]
+
+    espressif_pythons = sorted(
+        glob.glob(os.path.expanduser("~/.espressif/python_env/*/bin/python"))
+    )
+    for py_path in python_candidates + espressif_pythons:
+        if py_path != sys.executable and _python_has_module(py_path, "esptool"):
+            return [py_path, "-m", "esptool"]
+
     return None
 
 
-def read_device_mac(esptool_bin, port, baud):
-    cmd = [sys.executable, "-m", "esptool"] if not esptool_bin else [esptool_bin]
+def read_device_mac(esptool_cmd, port, baud):
+    cmd = list(esptool_cmd)
     if port:
         cmd.extend(["--port", port])
     cmd.extend(["--baud", str(baud), "read_mac"])
@@ -176,7 +239,7 @@ def read_device_mac(esptool_bin, port, baud):
         for line in res.stdout.splitlines():
             if "MAC:" in line:
                 return line.split("MAC:")[-1].strip()
-    except Exception as e:
+    except Exception:
         pass
     return "UNKNOWN"
 
@@ -196,6 +259,15 @@ def log_provision(device_name, mac, port, status):
         ])
 
 
+def resolve_build_artifact(build_dir, *relative_candidates):
+    """Return the first existing build artifact path, or the primary expected path."""
+    for rel_path in relative_candidates:
+        full_path = os.path.join(build_dir, rel_path)
+        if os.path.exists(full_path):
+            return full_path
+    return os.path.join(build_dir, relative_candidates[0])
+
+
 def main():
     parser = argparse.ArgumentParser(description="KSC TCU Factory NVS Provisioning & Flashing Tool")
     parser.add_argument("--status", action="store_true", help="Show current fleet registry status")
@@ -206,6 +278,7 @@ def main():
     parser.add_argument("--port", type=str, default=None, help="Serial port (auto-detects if omitted)")
     parser.add_argument("--baud", type=int, default=460800, help="Flashing baud rate (default: 460800)")
     parser.add_argument("--full", action="store_true", help="Flash complete firmware stack + NVS")
+    parser.add_argument("--esptool", type=str, default=None, help="Path to esptool.py / esptool executable")
     parser.add_argument("--prov-key", type=str, default="", help="Optional ThingsBoard provisioning key for NVS")
     parser.add_argument("--prov-secret", type=str, default="", help="Optional ThingsBoard provisioning secret for NVS")
 
@@ -248,9 +321,15 @@ def main():
     print(f"  Flashing TCU Device: {device_name}")
     print("==================================================")
 
-    esptool_bin = find_esptool()
+    esptool_cmd = find_esptool_cmd(args.esptool)
+    if not esptool_cmd:
+        print("[!] Error: Could not locate esptool (checked PATH, ~/.platformio/packages/tool-esptoolpy, and Python environments).")
+        print("    Install with 'pip install esptool' or pass '--esptool /path/to/esptool.py'.")
+        sys.exit(1)
+
+    print(f"[*] Using esptool: {' '.join(esptool_cmd)}")
     print(f"[*] Detecting device on port: {args.port or 'auto-detect'}...")
-    mac = read_device_mac(esptool_bin, args.port, args.baud)
+    mac = read_device_mac(esptool_cmd, args.port, args.baud)
     print(f"[*] Target ESP32 MAC: {mac}")
 
     # Generate NVS binary
@@ -261,21 +340,30 @@ def main():
         tmp_nvs_path = tmp_nvs.name
 
     try:
-        flash_cmd = [sys.executable, "-m", "esptool"] if not esptool_bin else [esptool_bin]
+        flash_cmd = list(esptool_cmd)
         if args.port:
             flash_cmd.extend(["--port", args.port])
         flash_cmd.extend(["--baud", str(args.baud), "write_flash"])
 
         if args.full:
-            # Full firmware flashing
+            # Full firmware flashing (PlatformIO places artifacts directly in build_dir)
             build_dir = os.path.join(PROJECT_DIR, ".pio", "build", "esp32-s3-devkitc-1")
-            bootloader = os.path.join(build_dir, "bootloader", "bootloader.bin")
-            partitions = os.path.join(build_dir, "partition_table", "partition-table.bin")
-            app_bin = os.path.join(build_dir, "KSC_TCU.bin")
+            bootloader = resolve_build_artifact(
+                build_dir, "bootloader.bin", os.path.join("bootloader", "bootloader.bin")
+            )
+            partitions = resolve_build_artifact(
+                build_dir, "partitions.bin", os.path.join("partition_table", "partition-table.bin")
+            )
+            app_bin = resolve_build_artifact(build_dir, "firmware.bin", "KSC_TCU.bin")
 
-            if not os.path.exists(app_bin):
-                print(f"[!] Error: Firmware binary not found at {app_bin}. Build first with PlatformIO.")
-                sys.exit(1)
+            for label, path in [
+                ("Bootloader", bootloader),
+                ("Partition table", partitions),
+                ("Firmware", app_bin),
+            ]:
+                if not os.path.exists(path):
+                    print(f"[!] Error: {label} binary not found at {path}. Build first with PlatformIO.")
+                    sys.exit(1)
 
             flash_cmd.extend([
                 "0x0", bootloader,

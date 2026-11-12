@@ -49,8 +49,9 @@ extern "C" {
 /** FreeRTOS event queue depth */
 #define POWER_EVENT_QUEUE_SIZE          5
 
-/** Maximum time (ms) the wait-for-stop task will wait before forcing
- *  trike poweroff regardless of motion state */
+/** Warning threshold (ms) for the wait-for-stop task.
+ *  If motion persists beyond this duration, periodic warnings are logged,
+ *  but power-off is NEVER forced while in motion to ensure operator/vehicle safety. */
 #define TRIKE_MAX_WAIT_FOR_STOP_MS      (30UL * 60UL * 1000UL)
 
 /* =========================================================================
@@ -193,7 +194,7 @@ void trike_ctrl_publish_state(void);
 /**
  * @brief Assert TRIKE_PWR_CTRL GPIO to physically cut trike power.
  *
- * Called by the power-off pipeline after publishing final state.
+ * Called immediately by the power-off pipeline to cut machine power without waiting for network I/O.
  */
 void power_mgmt_trike_poweroff(void);
 

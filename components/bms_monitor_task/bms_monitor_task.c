@@ -38,11 +38,20 @@
 /* =========================================================================
  * MOTION DETECTION
  * =========================================================================
- * Primary:   GPS speed cache (speed >= threshold).
- * Fallback:  Analog shunt current magnitude > MOTION_CURRENT_THRESHOLD_A.
+ * Conservative multi-sensor fusion:
+ *   1. GNSS Ground Speed:  gps_speed_kmh >= GPS_MOTION_SPEED_THRESHOLD_KMH (1.5 km/h)
+ *   2. Shunt Current:      |I_shunt| > MOTION_CURRENT_THRESHOLD_A (2.0 A)
+ *   3. 6-Axis IMU:         LSM6DSOX motion interrupt or vibration mag > 250 mg
+ *
+ * Safety Interlock: If ANY sensor detects motion, the vehicle is IN MOTION.
+ * Stationary Debounce: Requires MOTION_STOP_DEBOUNCE_CYCLES consecutive cycles
+ *                      of complete stillness across all sensors before declaring
+ *                      the vehicle stationary.
  * ========================================================================= */
 
-#define MOTION_CURRENT_THRESHOLD_A  2
+#define MOTION_CURRENT_THRESHOLD_A     2.0f
+#define MOTION_IMU_VIB_THRESHOLD_MG    250.0f
+#define MOTION_STOP_DEBOUNCE_CYCLES    3
 
 /* =========================================================================
  * MODULE STATE
@@ -70,7 +79,8 @@ static jk_device_t        jk_devices[BMS_BATTERY_COUNT];
 static bms_system_stats_t system_stats            = {0};
 static bool               task_running            = false;
 
-static volatile bool      trike_in_motion         = false;
+static volatile bool      trike_in_motion            = false;
+static uint8_t            s_stationary_cycle_count   = MOTION_STOP_DEBOUNCE_CYCLES;
 static volatile uint8_t   s_batteries_ok_count_final = 0;
 
 /* ── Per-pass timing diagnostics ── */
@@ -181,7 +191,7 @@ static void bms_monitor_task(void *pvParameters)
         s_snapshot_ready = true;
         xSemaphoreGive(s_snapshot_mutex);
 
-        /* Motion detection: GPS speed cache or shunt current threshold */
+        /* Motion detection: Multi-sensor conservative fusion */
         float gps_speed_kmh = 0.0f;
         bool  gps_valid     = gps_get_speed_cache(&gps_speed_kmh);
         bool  gps_motion    = false;
@@ -191,10 +201,10 @@ static void bms_monitor_task(void *pvParameters)
             ESP_LOGD(TAG, "Motion[GPS]: %.2fkm/h -> %s",
                      gps_speed_kmh, gps_motion ? "MOVING" : "STOPPED");
         } else {
-            ESP_LOGD(TAG, "Motion[GPS]: stale/invalid — checking IMU / shunt current");
+            ESP_LOGD(TAG, "Motion[GPS]: stale/invalid — relying on IMU & shunt current");
         }
 
-        /* Read IMU acceleration for motion detection & debugging */
+        /* Read IMU acceleration for motion detection & vibration tracking */
         lsm6dsox_accel_mg_t imu_accel = {0};
         esp_err_t imu_ret = lsm6dsox_read_accel_mg(&imu_accel);
         float imu_mag = 0.0f;
@@ -204,23 +214,61 @@ static void bms_monitor_task(void *pvParameters)
                             imu_accel.z_mg * imu_accel.z_mg);
         }
         bool imu_motion = lsm6dsox_is_in_motion();
+        if (!imu_motion && imu_ret == ESP_OK && lsm6dsox_get_mode() == LSM6DSOX_MODE_PRODUCTION) {
+            /* In PRODUCTION mode, HPF removes DC gravity; dynamic vibration > threshold indicates motion */
+            if (imu_mag > MOTION_IMU_VIB_THRESHOLD_MG) {
+                imu_motion = true;
+            }
+        }
 
+        /* Shunt current detection: Traction or auxiliary current > threshold */
         bool current_motion = (fabsf(snap) > MOTION_CURRENT_THRESHOLD_A);
-        trike_in_motion = gps_valid ? gps_motion : (imu_motion || current_motion);
+
+        /*
+         * Safety-critical arbitration:
+         * If ANY sensor modality detects active vehicle movement or load,
+         * flag raw motion as true immediately. No sensor masks another.
+         */
+        bool raw_motion = (gps_valid && gps_motion) || current_motion || imu_motion;
+
+        /*
+         * Asymmetric hysteresis / debouncing:
+         * - Motion transition to TRUE is instantaneous (1 cycle).
+         * - Stillness transition to FALSE requires MOTION_STOP_DEBOUNCE_CYCLES
+         *   consecutive cycles of stillness across all modalities before clearing
+         *   motion flag. Prevents false-stop triggers during gear shifting,
+         *   furrow turnaround, or zero-current coasting.
+         */
+        if (raw_motion) {
+            s_stationary_cycle_count = 0;
+            trike_in_motion = true;
+        } else {
+            if (s_stationary_cycle_count < MOTION_STOP_DEBOUNCE_CYCLES) {
+                s_stationary_cycle_count++;
+            }
+            if (s_stationary_cycle_count >= MOTION_STOP_DEBOUNCE_CYCLES) {
+                trike_in_motion = false;
+            }
+        }
 
         if (imu_ret == ESP_OK) {
-            ESP_LOGI(TAG, "[SHUNT] cycle %" PRIu32 ": I=%.3fA, motion=%s [GPS:%s, IMU:%s, I:%s] | IMU(mg): X=%.1f Y=%.1f Z=%.1f Mag=%.1f",
+            ESP_LOGI(TAG, "[SHUNT] cycle %" PRIu32 ": I=%.3fA, motion=%s [raw:%s, still_cnt:%d/%d | GPS:%s(%.1fkm/h), IMU:%s(Mag=%.1fmg), I:%s]",
                      s_snapshot_cycle_id, snap,
                      trike_in_motion ? "YES" : "NO",
+                     raw_motion ? "YES" : "NO",
+                     s_stationary_cycle_count, MOTION_STOP_DEBOUNCE_CYCLES,
                      gps_valid ? (gps_motion ? "YES" : "NO") : "N/A",
-                     imu_motion ? "YES" : "NO",
-                     current_motion ? "YES" : "NO",
-                     imu_accel.x_mg, imu_accel.y_mg, imu_accel.z_mg, imu_mag);
+                     gps_speed_kmh,
+                     imu_motion ? "YES" : "NO", imu_mag,
+                     current_motion ? "YES" : "NO");
         } else {
-            ESP_LOGI(TAG, "[SHUNT] cycle %" PRIu32 ": I=%.3fA, motion=%s [GPS:%s, IMU:ERR(%s), I:%s]",
+            ESP_LOGI(TAG, "[SHUNT] cycle %" PRIu32 ": I=%.3fA, motion=%s [raw:%s, still_cnt:%d/%d | GPS:%s(%.1fkm/h), IMU:ERR(%s), I:%s]",
                      s_snapshot_cycle_id, snap,
                      trike_in_motion ? "YES" : "NO",
+                     raw_motion ? "YES" : "NO",
+                     s_stationary_cycle_count, MOTION_STOP_DEBOUNCE_CYCLES,
                      gps_valid ? (gps_motion ? "YES" : "NO") : "N/A",
+                     gps_speed_kmh,
                      esp_err_to_name(imu_ret),
                      current_motion ? "YES" : "NO");
         }

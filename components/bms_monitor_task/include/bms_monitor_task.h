@@ -135,10 +135,15 @@ void bms_monitor_reset_stats(void);
 bool bms_monitor_task_is_running(void);
 
 /**
- * @brief Check whether the trike is currently in motion.
+ * @brief Check whether the trike/tiller is currently in motion.
  *
- * Uses LIS3DHTR hardware interrupt as primary indicator; falls back to
- * battery current draw if the accelerometer is unavailable.
+ * Implements conservative multi-sensor fusion:
+ *   - GNSS speed >= GPS_MOTION_SPEED_THRESHOLD_KMH (1.5 km/h)
+ *   - Shunt current magnitude > MOTION_CURRENT_THRESHOLD_A (2.0 A)
+ *   - 6-axis IMU wake-up interrupt or dynamic vibration magnitude > 250 mg
+ *
+ * Any positive sensor input immediately flags motion. A debounce filter
+ * requires 3 consecutive cycles of stillness before declaring the machine stopped.
  *
  * @return true if motion is detected.
  */

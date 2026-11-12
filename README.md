@@ -285,7 +285,7 @@ The system features native drivers for the **LSM6DSOX** 6-axis IMU (`components/
 
 - **Kill Switch & Contactor Gate:** Driven via GPIO21 (`BOARD_TRIKE_PWR_PIN`).
 - **Safety Interlock:** If ThingsBoard issues an RPC power-off command (`method: "P_OFF"` or `TRSW`), the TCU evaluates `check_trike_motion()`.
-- **Motion Wait Loop:** If vehicle speed exceeds 5.0 km/h (or shunt current exceeds 2.0 A), power-off is held in pending status, triggering the `ALERT_TRIKE_STOPPING` LED pattern while `trike_wait_for_stop_task` polls for 0 km/h before de-asserting the kill switch.
+- **Motion Wait Loop:** If vehicle speed exceeds 1.5 km/h, traction shunt current exceeds 2.0 A, or IMU motion/vibration is active, power-off is held in pending status, triggering the `ALERT_TRIKE_STOPPING` LED pattern while `trike_wait_for_stop_task` polls for complete stillness (debounced over 3 seconds) before de-asserting the kill switch.
 
 ### 6.7 Status LED Alert Management
 
@@ -431,6 +431,7 @@ The portal is self-contained in MCU flash with no external CDN or internet depen
 | `trike_sens`| `nvs` | `cur_offset`  | `i32` | Calibrated zero-current offset in integer mA |
 |             |       | `temp_offset` | `i32` | Calibrated temperature offset in m°C |
 | `trike_ctrl`| `nvs` | `pwr_conf`    | `u8`  | Tiller power / kill-switch state (restored across reboots) |
+|             |       | `pwr_pend`    | `u8`  | Pending power-off state across reboots (1=killswitch armed/waiting for halt) |
 | `jkbms_ser` | `nvs` | `bms0_ser`    | `str` | Cached serial number for Battery 1 |
 |             |       | `bms1_ser`    | `str` | Cached serial number for Battery 2 |
 |             |       | `bms2_ser`    | `str` | Cached serial number for Battery 3 |

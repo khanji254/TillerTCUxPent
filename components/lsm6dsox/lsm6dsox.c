@@ -310,6 +310,26 @@ bool lsm6dsox_consume_impact(void)
     return ret;
 }
 
+static esp_err_t fifo_reset_and_stream(void)
+{
+    /* 1. Bypass mode first to reset/flush stale FIFO contents */
+    esp_err_t ret = write_reg(LSM6DSOX_REG_FIFO_CTRL4, 0x00);
+    if (ret != ESP_OK) return ret;
+    vTaskDelay(pdMS_TO_TICKS(5));
+
+    /* 2. Configure batching rate: Accelerometer at 208 Hz, Gyro disabled */
+    /* FIFO_CTRL3: BDR_XL[3:0] = 0101 (208 Hz), BDR_GY[3:0] = 0000 */
+    ret = write_reg(LSM6DSOX_REG_FIFO_CTRL3, 0x05);
+    if (ret != ESP_OK) return ret;
+
+    /* 3. Stream / Continuous mode: FIFO_MODE[2:0] = 110 (0x06) */
+    ret = write_reg(LSM6DSOX_REG_FIFO_CTRL4, 0x06);
+    if (ret != ESP_OK) return ret;
+
+    lsm6dsox_accumulator_reset();
+    return ESP_OK;
+}
+
 esp_err_t lsm6dsox_configure_mode(lsm6dsox_mode_t mode)
 {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
@@ -320,20 +340,31 @@ esp_err_t lsm6dsox_configure_mode(lsm6dsox_mode_t mode)
         ret = write_reg(LSM6DSOX_REG_CTRL1_XL, 0x50); /* ODR=208Hz, FS=±2g */
         if (ret != ESP_OK) return ret;
         /* Enable HPF on CTRL8_XL (bit 2 HP_SLOPE_XL_EN = 1) */
-        write_reg(LSM6DSOX_REG_CTRL8_XL, 0x04);
+        ret = write_reg(LSM6DSOX_REG_CTRL8_XL, 0x04);
+        if (ret != ESP_OK) return ret;
         s_sensitivity_mg = LSM6DSOX_SENS_MG_2G;
         s_mode = LSM6DSOX_MODE_PRODUCTION;
+        /* Let the slope/HPF filter settle before batching into FIFO */
+        vTaskDelay(pdMS_TO_TICKS(10));
         ESP_LOGI(TAG, "Mode -> PRODUCTION (208 Hz, ±2g, HPF on)");
     } else {
         /* TEST: ±16g, 208 Hz, HPF disabled (gravity visible) */
         ret = write_reg(LSM6DSOX_REG_CTRL1_XL, 0x54); /* ODR=208Hz, FS=±16g */
         if (ret != ESP_OK) return ret;
         /* Disable HPF on CTRL8_XL */
-        write_reg(LSM6DSOX_REG_CTRL8_XL, 0x00);
+        ret = write_reg(LSM6DSOX_REG_CTRL8_XL, 0x00);
+        if (ret != ESP_OK) return ret;
         s_sensitivity_mg = LSM6DSOX_SENS_MG_16G;
         s_mode = LSM6DSOX_MODE_TEST;
         ESP_LOGI(TAG, "Mode -> TEST (208 Hz, ±16g, HPF off, gravity visible)");
     }
+
+    /* Flush FIFO if enabled so samples from the prior FS/filter aren't mis-scaled */
+    if (s_fifo_enabled) {
+        ret = fifo_reset_and_stream();
+        if (ret != ESP_OK) return ret;
+    }
+
     return ESP_OK;
 }
 
@@ -366,19 +397,10 @@ esp_err_t lsm6dsox_fifo_enable(void)
 {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
 
-    /* 1. Bypass mode first to reset FIFO */
-    write_reg(LSM6DSOX_REG_FIFO_CTRL4, 0x00);
-    vTaskDelay(pdMS_TO_TICKS(5));
-
-    /* 2. Configure batching rate: Accelerometer at 208 Hz, Gyro disabled */
-    /* FIFO_CTRL3: BDR_XL[3:0] = 0101 (208 Hz), BDR_GY[3:0] = 0000 */
-    write_reg(LSM6DSOX_REG_FIFO_CTRL3, 0x05);
-
-    /* 3. Stream / Continuous mode: FIFO_MODE[2:0] = 110 (0x06) */
-    write_reg(LSM6DSOX_REG_FIFO_CTRL4, 0x06);
+    esp_err_t ret = fifo_reset_and_stream();
+    if (ret != ESP_OK) return ret;
 
     s_fifo_enabled = true;
-    lsm6dsox_accumulator_reset();
     ESP_LOGI(TAG, "FIFO stream mode enabled — 208 Hz batching into Continuous FIFO");
     return ESP_OK;
 }
@@ -389,77 +411,88 @@ esp_err_t lsm6dsox_fifo_drain_accumulate(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    uint8_t status1 = 0, status2 = 0;
-    if (read_regs(LSM6DSOX_REG_FIFO_STATUS1, &status1, 1) != ESP_OK ||
-        read_regs(LSM6DSOX_REG_FIFO_STATUS2, &status2, 1) != ESP_OK) {
+    uint8_t status[2] = {0};
+    if (read_regs(LSM6DSOX_REG_FIFO_STATUS1, status, sizeof(status)) != ESP_OK) {
         return ESP_FAIL;
     }
 
-    /* FIFO empty flag: bit 4 of status2 */
-    if (status2 & 0x10) {
+    /* LSM6DSOX FIFO_STATUS1/2: 10-bit unread word count in [9:0]; 0 == empty */
+    uint16_t diff_fifo = (uint16_t)status[0] | (((uint16_t)(status[1] & 0x03)) << 8);
+    if (diff_fifo == 0) {
         return ESP_OK;
     }
 
-    uint16_t diff_fifo = (uint16_t)status1 | (((uint16_t)(status2 & 0x03)) << 8);
-    if (diff_fifo == 0) return ESP_OK;
-
-    /* Cap at 32 words per drain (each word is 7 bytes: 1 tag + 6 data) */
-    uint16_t n_words = (diff_fifo > LSM6DSOX_FIFO_DEPTH) ? LSM6DSOX_FIFO_DEPTH : diff_fifo;
-
-    static uint8_t buf[LSM6DSOX_FIFO_DEPTH * 7];
-    esp_err_t ret = read_regs(LSM6DSOX_REG_FIFO_DATA_TAG, buf, n_words * 7);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "FIFO burst read (%u words) failed: %s", n_words, esp_err_to_name(ret));
-        return ret;
+    if (status[1] & 0x40) {
+        ESP_LOGW(TAG, "FIFO overrun detected (unread=%u words)", diff_fifo);
     }
 
+    /* Drain all unread words in bursts of up to LSM6DSOX_FIFO_DEPTH (32).
+     * At 208 Hz and a 160 ms drain period (~33.3 samples), a single 32-word cap
+     * falls behind and causes continuous overrun. Bound to 512 words (full FIFO). */
+    uint16_t remaining = (diff_fifo > 512) ? 512 : diff_fifo;
+    const bool apply_sw_gravity_sub =
+        s_gravity_calibrated && (s_mode == LSM6DSOX_MODE_TEST);
+
+    static uint8_t buf[LSM6DSOX_FIFO_DEPTH * 7];
     float sum_x2 = 0.0f, sum_y2 = 0.0f, sum_z2 = 0.0f;
     float sum_x = 0.0f, sum_y = 0.0f, sum_z = 0.0f;
     float peak_x_abs = 0.0f, peak_y_abs = 0.0f, peak_z_abs = 0.0f;
     float peak_x_sgn = 0.0f, peak_y_sgn = 0.0f, peak_z_sgn = 0.0f;
-    uint8_t valid_samples = 0;
+    uint16_t valid_samples = 0;
 
-    for (uint16_t i = 0; i < n_words; i++) {
-        const uint8_t *w = &buf[i * 7];
-        uint8_t tag = w[0] >> 3;
-
-        /* Verify accelerometer tag */
-        if (tag != LSM6DSOX_FIFO_TAG_ACCEL && tag != 0x00) {
-            continue;
+    while (remaining > 0) {
+        uint16_t n_words = (remaining > LSM6DSOX_FIFO_DEPTH) ? LSM6DSOX_FIFO_DEPTH : remaining;
+        esp_err_t ret = read_regs(LSM6DSOX_REG_FIFO_DATA_TAG, buf, n_words * 7);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "FIFO burst read (%u words) failed: %s", n_words, esp_err_to_name(ret));
+            return ret;
         }
+        remaining -= n_words;
 
-        int16_t raw_x = (int16_t)((w[2] << 8) | w[1]);
-        int16_t raw_y = (int16_t)((w[4] << 8) | w[3]);
-        int16_t raw_z = (int16_t)((w[6] << 8) | w[5]);
+        for (uint16_t i = 0; i < n_words; i++) {
+            const uint8_t *w = &buf[i * 7];
+            uint8_t tag = w[0] >> 3;
 
-        float x = (float)raw_x * s_sensitivity_mg;
-        float y = (float)raw_y * s_sensitivity_mg;
-        float z = (float)raw_z * s_sensitivity_mg;
+            /* Verify accelerometer tag */
+            if (tag != LSM6DSOX_FIFO_TAG_ACCEL && tag != 0x00) {
+                continue;
+            }
 
-        if (s_gravity_calibrated) {
-            x = (x - s_gravity_x_mg) * LSM6DSOX_WITMOTION_SCALE;
-            y = (y - s_gravity_y_mg) * LSM6DSOX_WITMOTION_SCALE;
-            z = (z - s_gravity_z_mg) * LSM6DSOX_WITMOTION_SCALE;
+            int16_t raw_x = (int16_t)((w[2] << 8) | w[1]);
+            int16_t raw_y = (int16_t)((w[4] << 8) | w[3]);
+            int16_t raw_z = (int16_t)((w[6] << 8) | w[5]);
+
+            float x = (float)raw_x * s_sensitivity_mg;
+            float y = (float)raw_y * s_sensitivity_mg;
+            float z = (float)raw_z * s_sensitivity_mg;
+
+            /* Only subtract software gravity baseline when hardware HPF is off;
+             * in PRODUCTION mode CTRL8_XL HPF already removes DC gravity. */
+            if (apply_sw_gravity_sub) {
+                x -= s_gravity_x_mg;
+                y -= s_gravity_y_mg;
+                z -= s_gravity_z_mg;
+            }
+
+            sum_x2 += x * x;
+            sum_y2 += y * y;
+            sum_z2 += z * z;
+            sum_x  += x;
+            sum_y  += y;
+            sum_z  += z;
+
+            float ax = fabsf(x), ay = fabsf(y), az = fabsf(z);
+            if (ax > peak_x_abs) { peak_x_abs = ax; peak_x_sgn = x; }
+            if (ay > peak_y_abs) { peak_y_abs = ay; peak_y_sgn = y; }
+            if (az > peak_z_abs) { peak_z_abs = az; peak_z_sgn = z; }
+
+            /* Instant shock detection */
+            if (sqrtf(x * x + y * y + z * z) > 5000.0f) {
+                s_impact_pending = true;
+            }
+
+            valid_samples++;
         }
-
-        sum_x2 += x * x;
-        sum_y2 += y * y;
-        sum_z2 += z * z;
-        sum_x  += x;
-        sum_y  += y;
-        sum_z  += z;
-
-        float ax = fabsf(x), ay = fabsf(y), az = fabsf(z);
-        if (ax > peak_x_abs) { peak_x_abs = ax; peak_x_sgn = x; }
-        if (ay > peak_y_abs) { peak_y_abs = ay; peak_y_sgn = y; }
-        if (az > peak_z_abs) { peak_z_abs = az; peak_z_sgn = z; }
-
-        /* Instant shock detection */
-        if (sqrtf(x * x + y * y + z * z) > 5000.0f) {
-            s_impact_pending = true;
-        }
-
-        valid_samples++;
     }
 
     if (valid_samples == 0) return ESP_OK;
@@ -478,10 +511,13 @@ esp_err_t lsm6dsox_fifo_drain_accumulate(void)
         .x_max_signed_mg = peak_x_sgn,
         .y_max_signed_mg = peak_y_sgn,
         .z_max_signed_mg = peak_z_sgn,
-        .n_samples       = valid_samples,
+        .n_samples       = (valid_samples > UINT8_MAX) ? UINT8_MAX : (uint8_t)valid_samples,
     };
 
-    if (s_acc_mutex && xSemaphoreTake(s_acc_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+    if (s_acc_mutex) {
+        if (xSemaphoreTake(s_acc_mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+            return ESP_ERR_TIMEOUT;
+        }
         s_acc_buf[s_acc_head] = win;
         s_acc_head = (s_acc_head + 1) % LSM6DSOX_ACC_BUF_SIZE;
         if (s_acc_count < LSM6DSOX_ACC_BUF_SIZE) s_acc_count++;
