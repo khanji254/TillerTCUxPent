@@ -1,8 +1,8 @@
 /*
  * modbus.h
  *
- *  Created on: Jun 19, 2025
- *      Author: collo
+ *  Created on: Nov 09, 2026
+ *      Author: Collins N. Osebe
  *      Addons: don
  */
 

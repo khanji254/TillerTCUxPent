@@ -2,7 +2,7 @@
  * @file Quectel_mqtt.c
  * @brief Quectel EG915N Modem MQTT Transport Layer Implementation
  *
- * Full provisioning workflow for KSC TCU V1.1.  Key changes from original:
+ * Full provisioning workflow for KSC TCU V2.1.  Key changes from original:
  *
  *  1. Runtime credential buffers (mqtt_username / mqtt_password /
  *     mqtt_client_id) replace the compile-time MQTT_USERNAME macros.
@@ -28,8 +28,8 @@
  *       with stored credentials, tcu_force_reprovision() is called
  *       and the device restarts to re-provision.
  *
- * @author  Mary Mbugua
- * @date    2026-04-10
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
  
 #include "Quectel_mqtt.h"
@@ -40,6 +40,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_random.h"
  
 /* =========================================================================
  * MODULE STATE
@@ -480,6 +481,29 @@ bool mqtt_pubclient_battery(void)
  * successfully processed, not as "timed out".
  * ========================================================================= */
  
+/* =========================================================================
+ * RPC ANTI-REPLAY CACHE
+ * =========================================================================
+ * Retains the last 32 ThingsBoard RPC request IDs to prevent duplicate or
+ * replayed commands (e.g. replayed power-off / contactor commands).
+ * ========================================================================= */
+#define RPC_HISTORY_SIZE 32
+static int s_rpc_history[RPC_HISTORY_SIZE] = {0};
+static int s_rpc_history_idx = 0;
+
+static bool is_rpc_request_replayed(int req_id)
+{
+    if (req_id <= 0) return false;
+    for (int i = 0; i < RPC_HISTORY_SIZE; i++) {
+        if (s_rpc_history[i] == req_id) {
+            return true;
+        }
+    }
+    s_rpc_history[s_rpc_history_idx] = req_id;
+    s_rpc_history_idx = (s_rpc_history_idx + 1) % RPC_HISTORY_SIZE;
+    return false;
+}
+
 bool read_buffered_messages(int recv_id)
 {
     /* Only check MQTT connection state in normal (non-provisioning) mode.
@@ -581,6 +605,13 @@ bool read_buffered_messages(int recv_id)
             }
             if (request_id < 0) {
                 ESP_LOGW(TAG_GSM, "No valid request_id in RPC topic: %s", topic);
+                continue;
+            }
+
+            /* Anti-replay protection: drop duplicate or replayed RPC request IDs */
+            if (is_rpc_request_replayed(request_id)) {
+                ESP_LOGW(TAG_GSM, "REPLAY ATTACK BLOCKED: RPC request_id %d already executed — discarding",
+                         request_id);
                 continue;
             }
         }
@@ -1003,6 +1034,21 @@ bool open_mqtts_with_creds(const char *client_id,
                              const char *username,
                              const char *password)
 {
+#if MQTTS_ENABLED
+    /* Configure Quectel EG915N SSL/TLS engine for encrypted MQTTS transport */
+    ESP_LOGI(TAG_GSM, "Configuring modem hardware TLS for MQTTS (port %d)...", MQTT_PORT);
+    send_at_command("AT+QMTCFG=\"ssl\",0,1,1", "OK", 2, 2000, NULL, 0);
+    send_at_command("AT+QSSLCFG=\"sslversion\",1,4", "OK", 2, 2000, NULL, 0);
+    send_at_command("AT+QSSLCFG=\"ciphersuite\",1,0xFFFF", "OK", 2, 2000, NULL, 0);
+    send_at_command("AT+QSSLCFG=\"ignorelocaltime\",1,1", "OK", 2, 2000, NULL, 0);
+    char sec_cmd[32];
+    snprintf(sec_cmd, sizeof(sec_cmd), "AT+QSSLCFG=\"seclevel\",1,%d", MQTTS_SECLEVEL);
+    send_at_command(sec_cmd, "OK", 2, 2000, NULL, 0);
+#else
+    /* Plaintext unencrypted MQTT (SSL disabled) */
+    send_at_command("AT+QMTCFG=\"ssl\",0,0", "OK", 2, 2000, NULL, 0);
+#endif
+
     char open_cmd[100];
     snprintf(open_cmd, sizeof(open_cmd),
              "AT+QMTOPEN=0,\"%s\",%d", MQTT_BROKER, MQTT_PORT);
@@ -1225,8 +1271,12 @@ bool tcu_load_or_provision_creds(void)
             mqtt_username[TCU_CRED_MAX_LEN  - 1] = '\0';
             mqtt_password[TCU_CRED_MAX_LEN  - 1] = '\0';
             mqtt_client_id[TCU_CRED_MAX_LEN - 1] = '\0';
-            ESP_LOGI(TAG_GSM, "Credentials loaded from NVS — user=%s clientId=%s",
-                     mqtt_username, mqtt_client_id);
+            if (strlen(creds.device_name) > 0) {
+                strncpy(HUB_NAME, creds.device_name, sizeof(HUB_NAME) - 1);
+                HUB_NAME[sizeof(HUB_NAME) - 1] = '\0';
+            }
+            ESP_LOGI(TAG_GSM, "Credentials loaded from NVS — device=%s user=%s clientId=%s",
+                     HUB_NAME, mqtt_username, mqtt_client_id);
             return true;
         }
  
@@ -1676,34 +1726,54 @@ bool publish_rpc_responses(RpcResponse *responses, int count)
  * =========================================================================
  * Builds the MQTT_BASIC provisioning request per ThingsBoard spec:
  * {
- *   "deviceName":            "TCU_A4CF12B3E501",
- *   "provisionDeviceKey":    "c1mtrworzsysp7vrth4z",
- *   "provisionDeviceSecret": "30irfv1tah0d5on6b1tx",
+ *   "deviceName":            "TCU_<MAC>",
+ *   "provisionDeviceKey":    "<from Kconfig or NVS>",
+ *   "provisionDeviceSecret": "<from Kconfig or NVS>",
  *   "credentialsType":       "MQTT_BASIC",
- *   "username":              "TCU_A4CF12B3E501",
- *   "password":              "TCU_A4CF12B3E501_ksc",
- *   "clientId":              "A4CF12B3E501"
+ *   "username":              "TCU_<MAC>",
+ *   "password":              "<cryptographically random 32-char hex>",
+ *   "clientId":              "<MAC>"
  * }
  *
- * Convention: username = HUB_NAME, password = HUB_NAME + "_ksc",
- * clientId = deviceSerial (MAC).  This keeps credentials derivable
- * from the hardware identity so they can be reconstructed if NVS
- * is corrupted (see NVS fallback discussion in header comments).
+ * Credentials use a cryptographically secure random password generated via
+ * hardware RNG (esp_fill_random) on the ESP32. Upon successful response,
+ * ThingsBoard saves these credentials and the device persists them into NVS.
  * ========================================================================= */
- 
+
 char *create_provision_json_payload(void)
 {
-    char derived_password[64];
-    snprintf(derived_password, sizeof(derived_password), "%s_ksc", HUB_NAME);
- 
+    char prov_key[TCU_CRED_MAX_LEN] = {0};
+    char prov_secret[TCU_CRED_MAX_LEN] = {0};
+
+    if (tcu_nvs_get_provisioning_credentials(prov_key, sizeof(prov_key),
+                                             prov_secret, sizeof(prov_secret)) != ESP_OK) {
+        ESP_LOGE(TAG_GSM, "Cannot build provisioning payload: missing provisioning key/secret in NVS and Kconfig!");
+        return NULL;
+    }
+
+    /* Generate a cryptographically secure random 32-character hex password per device */
+    uint8_t rand_bytes[16];
+    esp_fill_random(rand_bytes, sizeof(rand_bytes));
+    char random_password[33];
+    for (int i = 0; i < 16; i++) {
+        snprintf(&random_password[i * 2], 3, "%02x", rand_bytes[i]);
+    }
+    random_password[32] = '\0';
+
     cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        ESP_LOGE(TAG_GSM, "Failed to allocate cJSON object for provisioning");
+        return NULL;
+    }
+
     cJSON_AddStringToObject(root, "deviceName",            HUB_NAME);
-    cJSON_AddStringToObject(root, "provisionDeviceKey",    PROVISION_KEY);
-    cJSON_AddStringToObject(root, "provisionDeviceSecret", PROVISION_SECRET);
+    cJSON_AddStringToObject(root, "provisionDeviceKey",    prov_key);
+    cJSON_AddStringToObject(root, "provisionDeviceSecret", prov_secret);
     cJSON_AddStringToObject(root, "credentialsType",       CREDENTIALS_TYPE);
     cJSON_AddStringToObject(root, "username",              HUB_NAME);
-    cJSON_AddStringToObject(root, "password",              derived_password);
+    cJSON_AddStringToObject(root, "password",              random_password);
     cJSON_AddStringToObject(root, "clientId",              deviceSerial);
+
     char *s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return s;

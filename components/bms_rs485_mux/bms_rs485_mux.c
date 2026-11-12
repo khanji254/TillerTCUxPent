@@ -2,8 +2,8 @@
  * @file bms_rs485_mux.c
  * @brief RS-485 Battery MUX Control — MC74HC4052ADG Implementation
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "bms_rs485_mux.h"

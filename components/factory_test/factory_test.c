@@ -7,8 +7,8 @@
  *   - Power-cycle retry: up to MODEM_POWERCYCLE_RETRIES full cycles
  *     before declaring FAILED (each cycle: OFF → 1 s wait → ON)
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "factory_test.h"
@@ -770,7 +770,7 @@ static void test_adcs(factory_test_result_t *r)
 esp_err_t factory_test_run(void)
 {
     printf(TEST_SEPARATOR);
-    printf("  KSC TCU V1.1 Factory Self-Test\r\n");
+    printf("  KSC TCU V2.1 Factory Self-Test\r\n");
     printf("  HW: %-8s  FW: %-8s  Built: %s %s\r\n",
            HW_VERSION_STR, FW_VERSION_STR,
            FW_BUILD_DATE, FW_BUILD_TIME);

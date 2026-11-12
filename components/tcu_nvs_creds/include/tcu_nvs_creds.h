@@ -1,6 +1,6 @@
 /**
  * @file tcu_nvs_creds.h
- * @brief KSC TCU V1.1 — NVS Credential Storage for MQTT Provisioning
+ * @brief KSC TCU V2.1 — NVS Credential Storage for MQTT Provisioning
  *
  * Manages persistent MQTT credentials obtained via ThingsBoard device
  * provisioning.  Credentials are stored in a dedicated NVS namespace
@@ -16,8 +16,8 @@
  *  - NVS corruption is detected by read failures, triggering a full erase
  *    and re-provisioning via the fallback path.
  *
- * @author  Mary Mbugua
- * @date    2026-04-10
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef TCU_NVS_CREDS_H_
@@ -42,6 +42,8 @@ extern "C" {
 #define TCU_NVS_KEY_PASSWORD    "password"     /**< str:   MQTT password       */
 #define TCU_NVS_KEY_CLIENT_ID   "client_id"   /**< str:   MQTT client ID      */
 #define TCU_NVS_KEY_DEVICE_NAME "device_name" /**< str:   TB device name      */
+#define TCU_NVS_KEY_PROV_KEY    "prov_key"    /**< str:   TB provisioning key */
+#define TCU_NVS_KEY_PROV_SECRET "prov_secret" /**< str:   TB provisioning sec */
 
 /* Maximum credential string lengths (including null terminator) */
 #define TCU_CRED_MAX_LEN        64
@@ -117,6 +119,48 @@ esp_err_t tcu_nvs_save_creds(const tcu_mqtt_creds_t *creds);
  * @return ESP_OK on success.
  */
 esp_err_t tcu_nvs_erase_creds(void);
+
+/**
+ * @brief Completely wipe all keys in the tcu_creds namespace (factory reset).
+ *
+ * @return ESP_OK on success.
+ */
+esp_err_t tcu_nvs_factory_reset(void);
+
+/**
+ * @brief Retrieve the assigned device name from NVS.
+ *
+ * Checks "device_name" key in "tcu_creds" namespace.
+ *
+ * @param[out] name     Buffer to store device name.
+ * @param[in]  max_len  Size of buffer.
+ * @return ESP_OK if found and non-empty, ESP_ERR_NOT_FOUND otherwise.
+ */
+esp_err_t tcu_nvs_get_device_name(char *name, size_t max_len);
+
+/**
+ * @brief Store an assigned device name to NVS.
+ *
+ * @param[in] name Device name string (e.g. "KTCU_0001").
+ * @return ESP_OK on success.
+ */
+esp_err_t tcu_nvs_set_device_name(const char *name);
+
+/**
+ * @brief Retrieve ThingsBoard provisioning key and secret.
+ *
+ * Checks NVS namespace "tcu_creds" first for "prov_key" and "prov_secret".
+ * If not present in NVS, falls back to Kconfig values (CONFIG_TB_PROVISION_KEY
+ * and CONFIG_TB_PROVISION_SECRET).
+ *
+ * @param[out] key         Buffer to store provisioning key.
+ * @param[in]  key_len     Size of key buffer.
+ * @param[out] secret      Buffer to store provisioning secret.
+ * @param[in]  secret_len  Size of secret buffer.
+ * @return ESP_OK if valid credentials found, ESP_ERR_NOT_FOUND otherwise.
+ */
+esp_err_t tcu_nvs_get_provisioning_credentials(char *key, size_t key_len,
+                                               char *secret, size_t secret_len);
 
 /**
  * @brief Attempt NVS namespace repair after corruption is detected.

@@ -14,8 +14,8 @@
  *
  * All pin assignments are sourced from board_config.h.
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef BMS_RS485_MUX_H_

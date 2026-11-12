@@ -1,6 +1,6 @@
 /**
  * @file lis3dhtr.h
- * @brief LIS3DHTR Accelerometer Driver for KSC TCU V1.1 (ESP32-S3, I2C)
+ * @brief LIS3DHTR Accelerometer Driver for KSC TCU V2.1 (ESP32-S3, I2C)
  *
  * Provides full accelerometer functionality relevant to a three-wheeled
  * electric motorcycle (trike):
@@ -11,7 +11,7 @@
  *   - Free-fall detection (e.g. trike tipped over)
  *   - Continuous raw acceleration sampling
  *
- * Hardware wiring (TCU V1.1 board):
+ * Hardware wiring (TCU V2.1 board):
  *   SCL  → GPIO47  (4.7 kΩ external pull-up to 3.3 V)
  *   SDA  → GPIO48  (4.7 kΩ external pull-up to 3.3 V)
  *   SA0  → GND     → I2C address = 0x18
@@ -19,8 +19,8 @@
  *   INT1 → GPIO7   (hardware interrupt — click and activity detection)
  *   INT2 → not connected
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef LIS3DHTR_H_

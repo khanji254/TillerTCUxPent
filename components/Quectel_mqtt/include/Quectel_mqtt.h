@@ -1,13 +1,13 @@
 /**
  * @file Quectel_mqtt.h
- * @brief Quectel EG915N Modem MQTT Transport Layer for KSC TCU V1.1
+ * @brief Quectel EG915N Modem MQTT Transport Layer for KSC TCU V2.1
  *
  * Provides AT-command driven MQTT connectivity over the Quectel EG915N
  * cellular modem.  All pin assignments are sourced from board_config.h.
  *
- * Key changes from original V1.1:
+ * Key changes from original V2.1:
  *   - Full MQTT provisioning workflow integrated.
- *   - PROVISION_KEY / PROVISION_SECRET updated to Songa_Trikes profile.
+ *   - Provisioning credentials read from Kconfig (CONFIG_TB_PROVISION_*) or NVS.
  *   - MQTT_USERNAME / MQTT_PASSWORD / MQTT_CLIENT_ID are now runtime
  *     variables loaded from NVS (tcu_nvs_creds), not compile-time defines.
  *   - mqtt_subclient() now checks NVS and runs provisioning if needed.
@@ -18,8 +18,8 @@
  *     normal and provisioned paths share one connection function.
  *   - New: tcu_force_reprovision() for trike-swap / device-deleted recovery.
  *
- * @author  Mary Mbugua
- * @date    2026-04-10
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
  
 #ifndef QUECTEL_MQTT_H_
@@ -65,23 +65,49 @@ extern "C" {
 #define TAG_GSM              "MODEM"
  
 /* =========================================================================
- * THINGSBOARD CONNECTION
+ * THINGSBOARD CONNECTION & TRANSPORT SECURITY
  * ========================================================================= */
- 
+
+#include "sdkconfig.h"
+
 #define MQTT_BROKER          "thingsboard.iot.songa.mobi"
-#define MQTT_PORT             1883
- 
+
+#ifdef CONFIG_TB_MQTTS_ENABLED
+#define MQTTS_ENABLED        1
+#else
+#define MQTTS_ENABLED        1  /* Default to secure MQTTS on port 8883 */
+#endif
+
+#ifdef CONFIG_TB_MQTT_PORT
+#define MQTT_PORT            CONFIG_TB_MQTT_PORT
+#else
+#define MQTT_PORT            8883
+#endif
+
+#ifdef CONFIG_TB_MQTTS_SECLEVEL
+#define MQTTS_SECLEVEL       CONFIG_TB_MQTTS_SECLEVEL
+#else
+#define MQTTS_SECLEVEL       0  /* 0 = Hardware TLS encrypted channel without CA check */
+#endif
+
 /* =========================================================================
  * PROVISIONING PROFILE CREDENTIALS
  * =========================================================================
- * These are the PROFILE-LEVEL credentials from the Songa_Trikes device
- * profile.  They are ONLY used during the one-time provisioning handshake.
- * After provisioning, the device uses per-device credentials stored in NVS.
- * Never log or expose PROVISION_SECRET in production builds.
+ * Sourced from Kconfig (CONFIG_TB_PROVISION_KEY / CONFIG_TB_PROVISION_SECRET)
+ * or NVS via tcu_nvs_get_provisioning_credentials().
+ * Never hardcode secrets in source files.
  * ========================================================================= */
- 
-#define PROVISION_KEY        "c1mtrworzsysp7vrth4z"
-#define PROVISION_SECRET     "30irfv1tah0d5on6b1tx"
+
+#ifndef CONFIG_TB_PROVISION_KEY
+#define CONFIG_TB_PROVISION_KEY ""
+#endif
+
+#ifndef CONFIG_TB_PROVISION_SECRET
+#define CONFIG_TB_PROVISION_SECRET ""
+#endif
+
+#define PROVISION_KEY        CONFIG_TB_PROVISION_KEY
+#define PROVISION_SECRET     CONFIG_TB_PROVISION_SECRET
 #define CREDENTIALS_TYPE     "MQTT_BASIC"
  
 /* Provisioning MQTT connection uses these fixed credentials (TB spec) */

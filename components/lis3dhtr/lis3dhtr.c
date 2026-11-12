@@ -1,9 +1,9 @@
 /**
  * @file lis3dhtr.c
- * @brief LIS3DHTR Accelerometer Driver Implementation for KSC TCU V1.1
+ * @brief LIS3DHTR Accelerometer Driver Implementation for KSC TCU V2.1
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "lis3dhtr.h"

@@ -1,9 +1,9 @@
 /**
  * @file rgb_led.c
- * @brief RGB LED Alert System Implementation for KSC TCU V1.1
+ * @brief RGB LED Alert System Implementation for KSC TCU V2.1
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "rgb_led.h"

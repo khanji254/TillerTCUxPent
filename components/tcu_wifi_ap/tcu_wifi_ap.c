@@ -160,7 +160,7 @@ static esp_err_t api_live_get_handler(httpd_req_t *req)
         "}",
         rec.device_serial,
         rec.hub_name,
-        rec.fw_version[0] ? rec.fw_version : "1.1.0",
+        rec.fw_version[0] ? rec.fw_version : "1.0.0 (Wan)",
         rec.uptime_s,
         free_heap,
         s_client_count,

@@ -1,6 +1,6 @@
 /**
  * @file bms_monitor_task.h
- * @brief JK-BMS Battery Monitoring Task Interface for KSC TCU V1.1
+ * @brief JK-BMS Battery Monitoring Task Interface for KSC TCU V2.1
  *
  * Manages the periodic RS-485 polling of up to BMS_BATTERY_COUNT JK-BMS
  * batteries via the MC74HC4052ADG analog multiplexer.  Read results are
@@ -9,8 +9,8 @@
  * Motion detection uses the LIS3DHTR accelerometer as primary source with
  * battery current draw as a secondary fallback.
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef BMS_MONITOR_TASK_H_

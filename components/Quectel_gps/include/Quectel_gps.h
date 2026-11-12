@@ -2,7 +2,7 @@
  * @file Quectel_gps.h
  * @brief Quectel EG915N GPS Driver — Continuous NMEA Streaming via UART0
  *
- * On the TCU V1.1 board the Quectel EG915N debug UART streams continuous
+ * On the TCU 2.1 board the Quectel EG915N debug UART streams continuous
  * NMEA-0183 sentences to the ESP32-S3 UART0 (GPIO43 TX / GPIO44 RX).
  *
  * This module:
@@ -16,8 +16,8 @@
  * caller receives ESP_FAIL and should skip the GPS fields in the payload.
  * Stale/cached coordinates from previous fixes are not published.
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef QUECTEL_GPS_H_

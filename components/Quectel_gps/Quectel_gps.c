@@ -2,8 +2,8 @@
  * @file Quectel_gps.c
  * @brief Quectel EG915N GPS — Continuous NMEA Streaming Implementation
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "Quectel_gps.h"

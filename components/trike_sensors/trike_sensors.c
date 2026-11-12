@@ -2,8 +2,8 @@
  * @file trike_sensors.c
  * @brief Trike Analogue Sensor Readings — Voltage, Current, Temperature
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "trike_sensors.h"

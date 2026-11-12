@@ -1,6 +1,6 @@
 /**
  * @file rgb_led.h
- * @brief RGB LED Alert System for KSC TCU V1.1
+ * @brief RGB LED Alert System for KSC TCU V2.1
  *
  * Replaces the buzzer-tone alert system with visual LED alerts using
  * three independent GPIO-driven LEDs:
@@ -22,8 +22,8 @@
  *   6. ALERT_NORMAL         — Green 1 s heartbeat, Red steady ON, Blue OFF
  *   7. ALERT_BOOT           — All LEDs ON briefly during init
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef RGB_LED_H_

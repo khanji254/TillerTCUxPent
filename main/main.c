@@ -1,17 +1,17 @@
 /**
  * @file main.c
- * @brief KSC TCU V1.1 — ESP32-S3 Multi-Battery Monitor System
+ * @brief KSC TCU V2.1 — ESP32-S3 Multi-Battery Monitor System
  *
  * Application entry point and MQTT publish task for the Trike Control Unit
- * Version 1.1.  Combines JK-BMS battery monitoring, Quectel EG915N MQTT
+ * Version 2.1.  Combines JK-BMS battery monitoring, Quectel EG915N MQTT
  * telemetry, GPS position streaming, trike power control, accelerometer
  * motion detection, and analogue sensor readings.
  *
- * Hardware: TCU V1.1 board (ESP32-S3, MC74HC4052ADG RS-485 MUX,
+ * Hardware: TCU V2.1 board (ESP32-S3, MC74HC4052ADG RS-485 MUX,
  *           INA240A1PWR current sense, LIS3DHTR accelerometer).
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #include "driver/uart.h"
@@ -982,7 +982,7 @@ static void diag_log_task(void *pvParameters) {
 
 void app_main(void) {
 	ESP_LOGI(TAG, "========================================");
-	ESP_LOGI(TAG, "  KSC TCU V1.1  —  ESP32-S3");
+	ESP_LOGI(TAG, "  KSC TCU V2.1  —  ESP32-S3");
 	ESP_LOGI(TAG, "  FW: %s   HW: %s", FW_VERSION_STR, HW_VERSION_STR);
 	ESP_LOGI(TAG, "  Built: %s %s", FW_BUILD_DATE, FW_BUILD_TIME);
 	ESP_LOGI(TAG, "========================================");
@@ -1020,15 +1020,19 @@ void app_main(void) {
 	/* --- Serial number --- */
 	ESP_LOGI(TAG, "ESP32 Serial: %s", deviceSerial);
 
-	// Use hub name as the actual TCU number e.g jmbc_0008
-	// snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_8);
-	snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_3);
-	// snprintf(HUB_NAME, sizeof(HUB_NAME), "%s", TCU_DEVICE_7);
-	snprintf(HUB_NAME, sizeof(HUB_NAME), "TCU_%s", deviceSerial);
+	/* Determine Device Name (HUB_NAME):
+	 * 1. Check NVS for factory-assigned fleet name (e.g., KTCU_0000, KTCU_0001...)
+	 * 2. If not found in NVS, fall back to hardware-unique TCU_<MAC> */
+	if (tcu_nvs_get_device_name(HUB_NAME, sizeof(HUB_NAME)) != ESP_OK || strlen(HUB_NAME) == 0) {
+		snprintf(HUB_NAME, sizeof(HUB_NAME), "TCU_%s", deviceSerial);
+		ESP_LOGW(TAG, "No NVS device name assigned — defaulting to hardware MAC: %s", HUB_NAME);
+	} else {
+		ESP_LOGI(TAG, "Fleet device name loaded from NVS: %s", HUB_NAME);
+	}
 
-	/* Wi-Fi SoftAP and Live Telemetry Web Portal */
+	/* Wi-Fi SoftAP and Live Telemetry Web Portal matches HUB_NAME */
 	char ap_ssid[32];
-	snprintf(ap_ssid, sizeof(ap_ssid), "TCU_%s", deviceSerial);
+	snprintf(ap_ssid, sizeof(ap_ssid), "%s", HUB_NAME);
 	ret = tcu_wifi_ap_init(ap_ssid, "12345678");
 	if (ret != ESP_OK) {
 		ESP_LOGW(TAG, "Wi-Fi AP init failed: %s", esp_err_to_name(ret));

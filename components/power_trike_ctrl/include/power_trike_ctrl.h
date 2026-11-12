@@ -3,7 +3,7 @@
  * @brief Power Management and Trike Power Control — Combined Module
  *
  * Merges the previously separate power_management and trike_power_ctrl
- * modules into a single cohesive component for the TCU V1.1 board.
+ * modules into a single cohesive component for the TCU V2.1 board.
  *
  * Responsibilities:
  *   - Mains power detection and loss notification via FreeRTOS event queue
@@ -13,10 +13,10 @@
  *   - Reset reason reporting
  *
  * Removed from V1.0:
- *   - Button detection (no button on V1.1 board)
+ *   - Button detection (no button on V2.1 board)
  *   - NVS triple-press reset (no button; removed per design decision)
  *   - Backup battery ADC monitoring (not on TCU hardware)
- *   - MAINS_STATUS pin (removed in V1.1 hardware)
+ *   - MAINS_STATUS pin (removed in V2.1 hardware)
  *
  * ThingsBoard JSON field mapping:
  *   "1"  — Mains power present (0/1)
@@ -25,8 +25,8 @@
  *   "10" — power_confirmation:   true = trike ON, false = trike OFF
  *   "11" — Reset reason string (omitted on normal power-on reset)
  *
- * @author  Mary Mbugua
- * @date    2026-04-02
+ * @author  Collins N. Osebe
+ * @date    2026-11-09
  */
 
 #ifndef POWER_TRIKE_CTRL_H_

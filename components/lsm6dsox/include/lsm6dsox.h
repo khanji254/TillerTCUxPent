@@ -1,6 +1,6 @@
 /**
  * @file lsm6dsox.h
- * @brief LSM6DSOX 6-axis IMU Driver for KSC TCU V1.1 (ESP32-S3, I2C)
+ * @brief LSM6DSOX 6-axis IMU Driver for KSC TCU V2.1 (ESP32-S3, I2C)
  *
  * Provides full accelerometer functionality for three-wheeled electric motorcycles:
  *   - Motion detection (vehicle moving vs. stationary via WAKE_UP)
@@ -9,7 +9,7 @@
  *   - Hardware FIFO batching (208 Hz stream mode) and 1 Hz RMS accumulation
  *   - Gravity calibration and ThingsBoard telemetry statistics
  *
- * Hardware wiring (TCU V1.1 board):
+ * Hardware wiring (TCU V2.1 board):
  *   SCL  → GPIO47 (external pull-up)
  *   SDA  → GPIO48 (external pull-up)
  *   SA0  → GND (0x6A) or VDD (0x6B) [auto-detected]

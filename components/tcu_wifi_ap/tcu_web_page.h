@@ -1,6 +1,6 @@
 /**
  * @file tcu_web_page.h
- * @brief Self-contained HTML/CSS/JS dashboard for KSC TCU V1.1
+ * @brief Self-contained HTML/CSS/JS dashboard for KSC TCU V2.1
  *
  * Fully embedded in flash memory. No internet connection or external CDN required.
  */
@@ -229,7 +229,7 @@ static const char TCU_INDEX_HTML[] =
 "function updateUI(d){"
 "document.getElementById('errorBanner').style.display = 'none';"
 "document.getElementById('titleDevName').textContent = d.hub_name || 'KSC TCU';"
-"document.getElementById('subDevInfo').textContent = `Serial: ${d.device_serial || '--'} | FW: ${d.fw_version || '1.1.0'}`;"
+"document.getElementById('subDevInfo').textContent = `Serial: ${d.device_serial || '--'} | FW: ${d.fw_version || '1.0.0 (Wan)'}`;"
 "document.getElementById('valSerial').textContent = d.device_serial || '--';"
 "document.getElementById('valUptime').textContent = formatUptime(d.uptime_s || 0);"
 "document.getElementById('logCountText').textContent = `${d.log_records_count || 0} / ${d.log_capacity || 1000}`;"
