@@ -212,6 +212,23 @@ void power_mgmt_trike_poweron(void);
  */
 void power_mgmt_trike_set_gpio(bool trike_on);
 
+/**
+ * @brief Immediately set trike power / kill switch state (local/AP control).
+ *
+ * Updates GPIO40, NVS persistence, and RGB LED state without blocking on
+ * cellular modem AT commands.
+ *
+ * @param[in] trike_on  true = ON (GPIO HIGH), false = OFF / Kill Switch active (GPIO LOW).
+ */
+void trike_ctrl_set_power_direct(bool trike_on);
+
+/**
+ * @brief Toggle the trike power / kill switch state and return the new state.
+ *
+ * @return New state: true = ON, false = OFF.
+ */
+bool trike_ctrl_toggle_power(void);
+
 #ifdef __cplusplus
 }
 #endif

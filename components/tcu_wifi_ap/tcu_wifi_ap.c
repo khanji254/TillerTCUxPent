@@ -6,6 +6,7 @@
 #include "tcu_wifi_ap.h"
 #include "tcu_dns_server.h"
 #include "tcu_web_page.h"
+#include "power_trike_ctrl.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -58,8 +59,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
             wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *)event_data;
             if (s_client_count > 0) s_client_count--;
-            ESP_LOGI(TAG, "Client disconnected: " MACSTR ", AID=%d, Total clients: %d",
-                     MAC2STR(event->mac), event->aid, s_client_count);
+            ESP_LOGI(TAG, "Client disconnected: " MACSTR ", AID=%d, reason=%d, Total clients: %d",
+                     MAC2STR(event->mac), event->aid, event->reason, s_client_count);
         }
     }
 }
@@ -110,6 +111,7 @@ static esp_err_t api_live_get_handler(httpd_req_t *req)
         snprintf(rec.device_serial, sizeof(rec.device_serial), "TCU");
         snprintf(rec.hub_name, sizeof(rec.hub_name), "TCU_DEV");
     }
+    rec.trike_pwr_on = trike_ctrl_get_power_confirmation();
 
     uint32_t free_heap = esp_get_free_heap_size();
 
@@ -285,6 +287,27 @@ static esp_err_t api_log_clear_handler(httpd_req_t *req)
     return httpd_resp_send(req, resp, strlen(resp));
 }
 
+/**
+ * @brief POST /api/trike/toggle - Toggles the system / kill switch ON and OFF
+ */
+static esp_err_t api_trike_toggle_handler(httpd_req_t *req)
+{
+    bool is_on = trike_ctrl_toggle_power();
+
+    if (s_data_mutex && xSemaphoreTake(s_data_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        s_latest_record.trike_pwr_on = is_on;
+        xSemaphoreGive(s_data_mutex);
+    }
+
+    char resp[64];
+    int len = snprintf(resp, sizeof(resp),
+                       "{\"status\":\"ok\",\"trike_power_on\":%s}",
+                       is_on ? "true" : "false");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, resp, len);
+}
+
 /* =========================================================================
  * HTTP SERVER INITIALIZATION
  * ========================================================================= */
@@ -350,6 +373,14 @@ static esp_err_t start_web_server(void)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(s_http_server, &uri_clear);
+
+    httpd_uri_t uri_toggle = {
+        .uri = "/api/trike/toggle",
+        .method = HTTP_POST,
+        .handler = api_trike_toggle_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(s_http_server, &uri_toggle);
 
     /* Captive Portal URLs */
     httpd_uri_t uri_gen204 = {
@@ -452,16 +483,19 @@ esp_err_t tcu_wifi_ap_init(const char *ssid_override, const char *password)
     const char *pwd = password ? password : TCU_WIFI_AP_DEFAULT_PASSWORD;
     if (pwd && strlen(pwd) >= 8) {
         strncpy((char *)wifi_config.ap.password, pwd, sizeof(wifi_config.ap.password) - 1);
-        wifi_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+        wifi_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
         wifi_config.ap.pairwise_cipher = WIFI_CIPHER_TYPE_CCMP;
+        wifi_config.ap.pmf_cfg.required = false;
     } else {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
         wifi_config.ap.password[0] = 0;
     }
 
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     ESP_LOGI(TAG, "Wi-Fi SoftAP started successfully!");
     ESP_LOGI(TAG, "  SSID: %s", s_ap_ssid);

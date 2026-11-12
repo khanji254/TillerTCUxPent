@@ -1027,7 +1027,8 @@ void app_main(void) {
 	snprintf(HUB_NAME, sizeof(HUB_NAME), "TCU_%s", deviceSerial);
 
 	/* Wi-Fi SoftAP and Live Telemetry Web Portal */
-	char az snprintf(ap_ssid, sizeof(ap_ssid), "TCU_%s", deviceSerial);
+	char ap_ssid[32];
+	snprintf(ap_ssid, sizeof(ap_ssid), "TCU_%s", deviceSerial);
 	ret = tcu_wifi_ap_init(ap_ssid, "12345678");
 	if (ret != ESP_OK) {
 		ESP_LOGW(TAG, "Wi-Fi AP init failed: %s", esp_err_to_name(ret));

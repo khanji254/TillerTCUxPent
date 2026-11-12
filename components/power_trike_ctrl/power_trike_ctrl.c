@@ -54,7 +54,7 @@ static struct {
     .is_power_on_reset = false,
 };
 
-static volatile bool   s_power_confirmation = false;
+static volatile bool   s_power_confirmation = true;
 static volatile bool   s_resp_cmd_pending   = false;
 static volatile bool   s_resp_cmd_value     = false;
 static volatile bool   s_wait_task_running  = false;
@@ -114,9 +114,9 @@ static void execute_trike_poweroff(void)
     s_resp_cmd_pending = true;
     s_resp_cmd_value   = false;
 
-    if (!mqtt_pubclient_status(false)) {
+    if (!mqtt_pubclient_status()) {
         ESP_LOGE(TAG, "Failed to publish trike power-off state..retrying");
-        mqtt_pubclient_status(false);
+        mqtt_pubclient_status();
     }
 
     s_resp_cmd_pending = false;
@@ -205,11 +205,11 @@ static bool load_nvs_power_confirmation(bool *out_value)
     nvs_handle_t h;
     esp_err_t ret = nvs_open(TRIKE_NVS_NAMESPACE, NVS_READONLY, &h);
     if (ret != ESP_OK) {
-        *out_value = false;
+        *out_value = true;
         return false;
     }
 
-    uint8_t v = 0;
+    uint8_t v = 1;
     ret = nvs_get_u8(h, TRIKE_NVS_KEY_PCONF, &v);
     nvs_close(h);
 
@@ -220,7 +220,7 @@ static bool load_nvs_power_confirmation(bool *out_value)
         return true;
     }
 
-    *out_value = false;
+    *out_value = true;
     return false;
 }
 
@@ -295,14 +295,12 @@ esp_err_t power_trike_init(void)
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    /* Load trike state from NVS and restore GPIO level */
-    bool stored = false;
-    load_nvs_power_confirmation(&stored);
+    /* Default kill switch / trike power to ON at boot */
+    bool stored = true;
     s_power_confirmation = stored;
+    trike_ctrl_save_nvs(stored);
     power_mgmt_trike_set_gpio(stored);
-    
-    /*Set LED status to trike off if gpio state is 0*/
-    if(!stored) rgb_led_set_alert(ALERT_TRIKE_OFF,false);
+    rgb_led_set_alert(ALERT_NORMAL, false);
 
     s_resp_cmd_pending  = false;
     s_resp_cmd_value    = false;
@@ -423,6 +421,27 @@ void power_mgmt_trike_set_gpio(bool trike_on)
              level, trike_on ? "ON" : "OFF");
 }
 
+void trike_ctrl_set_power_direct(bool trike_on)
+{
+    s_power_confirmation = trike_on;
+    trike_ctrl_save_nvs(trike_on);
+    gpio_set_level(BOARD_TRIKE_PWR_PIN, trike_on ? 1 : 0);
+    if (trike_on) {
+        rgb_led_set_alert(ALERT_NORMAL, true);
+        ESP_LOGI(TAG, "AP Kill Switch Toggle: TRIKE_PWR_CTRL → HIGH (System ON)");
+    } else {
+        rgb_led_set_alert(ALERT_TRIKE_OFF, true);
+        ESP_LOGW(TAG, "AP Kill Switch Toggle: TRIKE_PWR_CTRL → LOW (System OFF)");
+    }
+}
+
+bool trike_ctrl_toggle_power(void)
+{
+    bool next_state = !s_power_confirmation;
+    trike_ctrl_set_power_direct(next_state);
+    return next_state;
+}
+
 bool trike_ctrl_get_power_confirmation(void)
 {
     return s_power_confirmation;
@@ -442,9 +461,9 @@ void trike_ctrl_handle_command(uint8_t trike_ctrl_value)
     	else ESP_LOGE(TAG, "Failed to switch RGB LED status!"); 
         ESP_LOGI(TAG, "Trike power ON");
 
-        if (!mqtt_pubclient_status(false)) {
+        if (!mqtt_pubclient_status()) {
             ESP_LOGE(TAG, "Trike ON ACK publish failed, retrying ...");
-            mqtt_pubclient_status(false);
+            mqtt_pubclient_status();
         }
         return;
     }
@@ -463,9 +482,9 @@ void trike_ctrl_handle_command(uint8_t trike_ctrl_value)
             s_resp_cmd_pending = true;
             s_resp_cmd_value   = true;
 
-            if (!mqtt_pubclient_status(false)) {
+            if (!mqtt_pubclient_status()) {
                 ESP_LOGE(TAG, "Failed to publish queued poweroff alert; retrying..");
-                mqtt_pubclient_status(false);
+                mqtt_pubclient_status();
             }
             s_resp_cmd_pending = false;
 

@@ -39,6 +39,7 @@ set(COMPONENT_DIR_PERIPHERALS
     components/power_trike_ctrl
     components/rgb_led
     components/lis3dhtr
+    components/lsm6dsox
     components/factory_test   
 )
 
